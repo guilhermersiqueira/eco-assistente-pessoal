@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Eco · protótipo do orbe</title>
+<style>
+html,body{margin:0;height:100%;background:#070b0b;color:#dcebe7;font:14px system-ui,"Segoe UI",sans-serif}
+#app{display:flex;flex-direction:column;height:100vh}
+#c{flex:1;min-height:0;width:100%;display:block;touch-action:none;cursor:crosshair}
+#cap{min-height:26px;text-align:center;padding:2px 16px 10px;color:#bcd9d3;font-size:15px;transition:opacity .6s}
+#bar{display:flex;flex-wrap:wrap;gap:6px;padding:10px;align-items:center;background:#0b1211;border-top:1px solid #1a2b28}
+button{background:#101a18;color:#dcebe7;border:1px solid #264039;border-radius:8px;padding:6px 10px;font:inherit;cursor:pointer}
+button:hover{border-color:#3f7266}
+button[aria-pressed=true]{background:#12332c;border-color:#35b8a0}
+label{margin-left:auto;display:flex;gap:8px;align-items:center;color:#8fb0a8}
+</style>
+</head>
+<body>
+<div id="app">
+  <canvas id="c"></canvas>
+  <div id="cap"></div>
+  <div id="bar"></div>
+</div>
+<script>
+(function () {
+  var cv = document.getElementById('c'), cx = cv.getContext('2d'), cap = document.getElementById('cap'), bar = document.getElementById('bar');
+  var W = 0, H = 0, S = 0;
+  function fit() {
+    var d = window.devicePixelRatio || 1, r = cv.getBoundingClientRect();
+    W = r.width; H = r.height;
+    cv.width = Math.max(1, W * d); cv.height = Math.max(1, H * d);
+    cx.setTransform(d, 0, 0, d, 0, 0);
+    S = Math.min(W, H) * 0.42;
+    cx.fillStyle = '#070b0b'; cx.fillRect(0, 0, W, H);
+  }
+  window.addEventListener('resize', fit); fit();
+
+  function rx(a) { var c = Math.cos(a), s = Math.sin(a); return [1, 0, 0, 0, c, -s, 0, s, c]; }
+  function ry(a) { var c = Math.cos(a), s = Math.sin(a); return [c, 0, s, 0, 1, 0, -s, 0, c]; }
+  function rz(a) { var c = Math.cos(a), s = Math.sin(a); return [c, -s, 0, s, c, 0, 0, 0, 1]; }
+  function mm(a, b) {
+    var o = new Array(9);
+    for (var i = 0; i < 3; i++) for (var j = 0; j < 3; j++) o[i * 3 + j] = a[i * 3] * b[j] + a[i * 3 + 1] * b[3 + j] + a[i * 3 + 2] * b[6 + j];
+    return o;
+  }
+
+  var groups = [], P = [], rays = [];
+  function mk(kind, r, tx, tz, spin, n) {
+    var gi = groups.length;
+    groups.push({ Rt: mm(rx(tx), rz(tz)), spin: spin, ang: Math.random() * 6.28, M: null });
+    for (var k = 0; k < n; k++) {
+      var x, y, z, rr = r * (1 + (Math.random() - .5) * (kind === 'ring' ? .06 : .1));
+      if (kind === 'ring') { var f = Math.random() * 6.2832; x = rr * Math.cos(f); y = rr * Math.sin(f); z = (Math.random() - .5) * .05; }
+      else { var u = Math.random() * 2 - 1, a = Math.random() * 6.2832, s = Math.sqrt(1 - u * u); x = rr * s * Math.cos(a); y = rr * s * Math.sin(a); z = rr * u; }
+      P.push({ g: gi, x: x, y: y, z: z, s: .5 + Math.random() * 1.4, h: Math.random() * 14 - 7 + (.65 - r) * 55, tw: Math.random() * 6.28, ox: 0, oy: 0, vx: 0, vy: 0 });
+    }
+  }
+  mk('ring', .30, .4, .2, 1.6, 160); mk('ring', .46, 1.1, .5, -1.1, 200); mk('ring', .62, .2, 1.2, .9, 220);
+  mk('ring', .78, 1.4, -.3, -.7, 240); mk('ring', .92, .6, .9, .5, 260); mk('ring', 1.0, 1.0, -1.0, -.35, 240);
+  mk('shell', .55, .3, .1, .8, 140); mk('shell', .85, -.4, .6, -.5, 160);
+  for (var i = 0; i < 40; i++) rays.push({ a: Math.random() * 6.2832, l: .9 + Math.random() * .3, o: .4 + Math.random() * .6, sp: (Math.random() - .5) * 1.2 });
+
+  var ST = {
+    idle:   { r: .45, spin: .25, br: .35, sat: 60, shk: 0, hs: 0 },
+    listen: { r: .72, spin: .6,  br: .85, sat: 85, shk: 0, hs: 0 },
+    think:  { r: .6,  spin: 2.4, br: .95, sat: 90, shk: 0, hs: 6 },
+    speak:  { r: .78, spin: 1.0, br: 1.05, sat: 90, shk: 0, hs: 4 },
+    confirm:{ r: .68, spin: .5,  br: 1,   sat: 90, shk: 0, hs: 10 },
+    error:  { r: .58, spin: .7,  br: .7,  sat: 80, shk: 3, hs: -150 },
+    mute:   { r: .4,  spin: .12, br: .25, sat: 6,  shk: 0, hs: 0 }
+  };
+  var NOMES = { idle: 'Dormindo', listen: 'Ouvindo', think: 'Pensando', speak: 'Falando', confirm: 'Confirmando', error: 'Erro', mute: 'Mudo' };
+  var TEXTOS = {
+    listen: 'Você: que horas são?',
+    speak: 'Eco: são três e meia da tarde.',
+    confirm: 'Enviar e-mail para Ana, assunto reunião. Posso confirmar?',
+    error: 'Sem crédito na OpenAI. Adicione crédito e tente de novo.',
+    mute: 'Mudo. Toque no orbe para voltar a ouvir.'
+  };
+  var FIXOS = { confirm: 1, error: 1, mute: 1 };
+
+  var state = 'listen', t = 0, last = performance.now(), lv = 0, flash = 0, gy = 0, gx = .35;
+  var down = false, inside = false, mx = 0, my = 0, capTimer = 0;
+  var cur = {}; for (var k0 in ST.listen) cur[k0] = ST.listen[k0];
+
+  var hs = document.createElement('input'); hs.type = 'range'; hs.min = 100; hs.max = 210; hs.value = 165; hs.id = 'h';
+  var btns = {};
+  function showCap(txt, fixed) {
+    clearTimeout(capTimer); cap.textContent = txt || ''; cap.style.opacity = txt ? 1 : 0;
+    if (txt && !fixed) capTimer = setTimeout(function () { cap.style.opacity = 0; }, 4500);
+  }
+  function setState(s) {
+    state = s;
+    for (var k in btns) btns[k].setAttribute('aria-pressed', String(k === s));
+    showCap(TEXTOS[s] || '', !!FIXOS[s]);
+  }
+  Object.keys(NOMES).forEach(function (k) {
+    var b = document.createElement('button'); b.textContent = NOMES[k];
+    b.addEventListener('click', function () { setState(k); });
+    bar.appendChild(b); btns[k] = b;
+  });
+  var mem = document.createElement('button'); mem.textContent = 'Memória guardada';
+  mem.addEventListener('click', function () { flash = 1.4; showCap('Guardado: gosta de café sem açúcar.', false); });
+  bar.appendChild(mem);
+  var lab = document.createElement('label'); lab.appendChild(document.createTextNode('Tom')); lab.appendChild(hs); bar.appendChild(lab);
+  setState('listen');
+
+  cv.addEventListener('pointermove', function (e) { var r = cv.getBoundingClientRect(); mx = e.clientX - r.left; my = e.clientY - r.top; inside = true; });
+  cv.addEventListener('pointerleave', function () { inside = false; });
+  cv.addEventListener('pointerdown', function () { down = true; });
+  window.addEventListener('pointerup', function () { down = false; });
+
+  function simLevel(tt, s) {
+    if (s === 'listen') { var g = Math.max(0, Math.sin(tt * .8) + .3); return g * (.35 + .4 * Math.abs(Math.sin(tt * 7.3)) * Math.abs(Math.sin(tt * 2.7))); }
+    if (s === 'speak') return (.3 + .7 * Math.abs(Math.sin(tt * 9))) * (.55 + .45 * Math.sin(tt * 1.9 + 1));
+    return 0;
+  }
+
+  function frame(now) {
+    var dt = Math.min(.05, (now - last) / 1000); last = now; t += dt;
+    var tg = ST[state], kk = Math.min(1, dt * 3);
+    for (var key in cur) cur[key] += (tg[key] - cur[key]) * kk;
+    lv += (simLevel(t, state) - lv) * Math.min(1, dt * 14);
+    flash = Math.max(0, flash - dt * 1.1);
+    var amp = state === 'listen' ? .35 : state === 'speak' ? .45 : 0;
+    var pul = state === 'confirm' ? Math.pow(Math.max(0, Math.sin(t * 4)), 3) * .12 : 0;
+    var R = S * cur.r * (1 + amp * lv + pul + flash * .12);
+    var br = cur.br + flash * .9;
+    var hue = +hs.value + cur.hs;
+    gy += dt * .12 * (cur.spin + .3);
+    var Rg = mm(ry(gy), rx(gx));
+    for (var gi = 0; gi < groups.length; gi++) { var g = groups[gi]; g.ang += dt * g.spin * cur.spin; g.M = mm(Rg, mm(g.Rt, rz(g.ang))); }
+
+    cx.globalCompositeOperation = 'source-over';
+    cx.fillStyle = 'rgba(7,11,11,.24)'; cx.fillRect(0, 0, W, H);
+    cx.globalCompositeOperation = 'lighter';
+    var ccx = W / 2, ccy = H / 2;
+    var jx = cur.shk > .05 ? (Math.random() - .5) * cur.shk * 2 : 0, jy = cur.shk > .05 ? (Math.random() - .5) * cur.shk * 2 : 0;
+
+    var gr = cx.createRadialGradient(ccx, ccy, 0, ccx, ccy, R * .6);
+    gr.addColorStop(0, 'hsla(' + (hue + 10) + ',95%,62%,' + (.30 * br).toFixed(3) + ')');
+    gr.addColorStop(1, 'hsla(' + hue + ',90%,50%,0)');
+    cx.fillStyle = gr; cx.fillRect(ccx - R, ccy - R, R * 2, R * 2);
+
+    var reach = S * .8, sat = cur.sat.toFixed(0), unit = S / 200;
+    for (var i = 0; i < P.length; i++) {
+      var p = P[i], M = groups[p.g].M;
+      var x = M[0] * p.x + M[1] * p.y + M[2] * p.z, y = M[3] * p.x + M[4] * p.y + M[5] * p.z, z = M[6] * p.x + M[7] * p.y + M[8] * p.z;
+      var f = 1 / (1 - z * .22), bx = ccx + jx + x * R * f, by = ccy + jy + y * R * f;
+      var px = bx + p.ox, py = by + p.oy;
+      if (inside) {
+        var dx = mx - px, dy = my - py, d = Math.sqrt(dx * dx + dy * dy);
+        if (d < reach && d > 1) { var fo = 1 - d / reach, a = (down ? 2600 : 900) * fo; p.vx += dx / d * a * dt; p.vy += dy / d * a * dt; }
+      }
+      if (state === 'speak' && lv > .6 && Math.random() < .004) { var rx0 = bx - ccx, ry0 = by - ccy, rl = Math.sqrt(rx0 * rx0 + ry0 * ry0) || 1; p.vx += rx0 / rl * 320; p.vy += ry0 / rl * 320; }
+      p.vx += -p.ox * 14 * dt; p.vy += -p.oy * 14 * dt;
+      var dm = Math.exp(-5 * dt); p.vx *= dm; p.vy *= dm; p.ox += p.vx * dt; p.oy += p.vy * dt;
+      px = bx + p.ox; py = by + p.oy;
+      var dep = (z + 1) / 2;
+      var al = Math.min(1, (.18 + .62 * dep) * br * (.75 + .25 * Math.sin(t * 3 + p.tw)));
+      var sz = p.s * (.6 + 1.1 * dep) * unit;
+      cx.fillStyle = 'hsla(' + (hue + p.h).toFixed(0) + ',' + sat + '%,' + (44 + dep * 24).toFixed(0) + '%,' + al.toFixed(2) + ')';
+      cx.fillRect(px - sz / 2, py - sz / 2, sz, sz);
+    }
+
+    cx.lineWidth = .6;
+    for (var j = 0; j < rays.length; j++) {
+      var r = rays[j], an = r.a + gy * r.sp, c = Math.cos(an), s = Math.sin(an);
+      cx.strokeStyle = 'hsla(' + hue + ',90%,65%,' + (.10 * br * r.o).toFixed(3) + ')';
+      cx.beginPath(); cx.moveTo(ccx + jx + c * R * .35, ccy + jy + s * R * .35); cx.lineTo(ccx + jx + c * R * r.l, ccy + jy + s * R * r.l); cx.stroke();
+    }
+    if (state === 'think') {
+      cx.setLineDash([6, 10]); cx.lineDashOffset = -t * 40; cx.lineWidth = 1.5;
+      cx.strokeStyle = 'hsla(' + (hue + 8) + ',95%,65%,.45)';
+      cx.beginPath(); cx.arc(ccx, ccy, R * 1.06, 0, 6.2832); cx.stroke(); cx.setLineDash([]);
+    }
+    if (state === 'confirm') {
+      cx.lineWidth = 2.2; cx.strokeStyle = 'hsla(' + (hue + 12) + ',95%,68%,.8)';
+      cx.beginPath(); cx.arc(ccx, ccy, R * 1.08, t * 2, t * 2 + 1.6); cx.stroke();
+    }
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

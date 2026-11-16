@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.env
+.env.*
+!.env.example
+google_token.json
+google_credentials.json
+client_secret*.json
+*.ppn
+*.onnx
+ensaio-*.txt
+*.db
