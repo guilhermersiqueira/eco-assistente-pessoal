@@ -167,8 +167,9 @@ ECO_LIGACAO_APROVAR=sim no .env; para desligar, ECO_LIGACAO_AUTO=nao.
 ## Importar conversas do claude.ai
 palavras: importar conversas claude.ai claude export memória fatos histórico passado revisar aprovar
 Dá para trazer para a memória da Eco o que você já contou ao Claude no site. No claude.ai, vá em Configurações >
-Privacidade > Exportar dados; o link chega por e-mail, e você baixa os arquivos (conversations-000.zip) para a pasta
-Downloads. Na aba Grafo, abra "Gerenciar", vá em "Importar conversas do claude.ai" e clique em "Procurar export": a Eco
+Privacidade > Exportar dados; o link chega por e-mail, e você baixa os arquivos conversations-000.zip e
+memories-000.zip para a pasta Downloads (o segundo é a memória que o claude.ai guarda de você, já organizada por
+assunto; a Eco lê os dois). Na aba Grafo, abra "Gerenciar", vá em "Importar conversas do claude.ai" e clique em "Procurar export": a Eco
 acha o mais recente, diz quantas conversas há e quanto deve custar (procurar não gasta nada). "Testar com 10" analisa só
 as 10 mais recentes, para você ver a qualidade; "Importar tudo" faz o resto. Antes de gastar ela avisa que o que você
 escreveu nas conversas vai para a Anthropic (as respostas do assistente são cortadas) e pede o seu sim; o teto é de US$ 2

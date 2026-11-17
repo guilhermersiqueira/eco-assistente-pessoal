@@ -267,3 +267,57 @@ def test_do_export_ao_plano_de_importacao(tmp_path):
     plano = filtro.planejar(r.conversas, estado, MODELO, 2.0)
     assert [c.uuid for c in plano.analisar] == ["longa"] and [c.uuid for c, _ in plano.ignoradas] == ["curta"]
     assert estado.importacoes()[0]["id"] == id_ and plano.estimativa.chamadas == 1
+
+
+# --- memória do claude.ai (memories-NNN.zip) ---------------------------------------------------------------------------
+def _memorias(caminho: Path, arquivos, resumo="Work context ..."):
+    dados = {"conversations_memory": resumo, "memory_files": arquivos, "account_uuid": "conta"}
+    with zipfile.ZipFile(caminho, "w") as z:
+        z.writestr("memories/conta.json", json.dumps(dados))
+    return caminho
+
+
+def _arquivo(path="/areas/gato.md", itens=("- [stated] Tem um gato chamado Mel [s:ab12]",), descricao="O gato do dono",
+             quando="2026-11-01T10:00:00+00:00"):
+    conteudo = f"---\nname: {path.strip('/').split('/')[-1][:-3]}\ndescription: {descricao}\nsources: [chat]\n---\n\n" + "\n".join(itens)
+    return {"path": path, "content": conteudo, "updated_at": quando}
+
+
+def test_itens_da_memoria_tiram_marca_fonte_e_linhas_soltas():
+    from eco.importacao.leitor import itens_da_memoria
+
+    conteudo = ("---\nname: x\ndescription: y\n---\n- [stated] Mora em Curitiba [s:1a2b]\nFINAL WRITE [s:1a2b]\n"
+                "- Gosta de café\n- [stated]  \n  - [inferred] Usa VS Code [s:ff00]")
+    assert itens_da_memoria(conteudo) == ["Mora em Curitiba", "Gosta de café", "Usa VS Code"]
+
+
+def test_ler_memorias_vira_um_assunto_por_arquivo(tmp_path):
+    from eco.importacao.leitor import ler_memorias
+    from eco.importacao.modelo import PREFIXO_MEMORIA
+
+    z = _memorias(tmp_path / "memories-000.zip", [_arquivo(), _arquivo("/profile.md", ("- [stated] Nome: Ana", "- [stated] 20 anos"),
+                                                                        "Quem é o dono")])
+    r = ler_memorias([z])
+    por_id = {c.uuid: c for c in r.conversas}
+    gato = por_id[PREFIXO_MEMORIA + "/areas/gato.md"]
+    assert gato.da_memoria and gato.titulo == "O gato do dono" and gato.atualizada_em.startswith("2026-11-01")
+    assert [(m.autor, m.texto) for m in gato.mensagens] == [(DONO, "Tem um gato chamado Mel")]
+    assert [m.texto for m in por_id[PREFIXO_MEMORIA + "/profile.md"].mensagens] == ["Nome: Ana", "20 anos"]
+    assert not r.avisos and r.hash
+
+
+def test_memoria_ilegivel_vira_aviso_e_nao_erro(tmp_path):
+    from eco.importacao.leitor import ler_memorias
+
+    ruim = tmp_path / "memories-000.zip"
+    ruim.write_bytes(b"nao e zip")
+    r = ler_memorias([ruim])
+    assert r.conversas == [] and "memória" in r.avisos[0]
+
+
+def test_localizar_junta_o_memories_do_mesmo_export(tmp_path):
+    conv = _mtime(_zip(tmp_path / "conversations-000.zip", [_conv()]), 2_000_000)
+    _mtime(_memorias(tmp_path / "memories-000.zip", [_arquivo()]), 2_000_100)
+    _mtime(_memorias(tmp_path / "memories-velho.zip", [_arquivo()]), 1_000_000)  # de outro export, bem mais antigo
+    e = localizar_export([tmp_path])
+    assert e.arquivos == [conv] and [p.name for p in e.memorias] == ["memories-000.zip"]

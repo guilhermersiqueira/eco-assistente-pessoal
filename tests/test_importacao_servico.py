@@ -160,3 +160,60 @@ def test_arquivo_ilegivel_vira_mensagem_e_nao_excecao(tmp_path, downloads):
     imp, _ = _importador(tmp_path, downloads, Haiku())
     p = imp.preparar()
     assert p.erro and not p.pode_importar
+
+
+def _memories(pasta, itens=("- [stated] Tem um gato chamado Mel [s:ab12]",)):
+    conteudo = "---\nname: gato\ndescription: O gato do dono\n---\n" + "\n".join(itens)
+    dados = {"memory_files": [{"path": "/areas/gato.md", "content": conteudo, "updated_at": "2026-11-15T10:00:00+00:00"}]}
+    with zipfile.ZipFile(pasta / "memories-000.zip", "w") as z:
+        z.writestr("memories/conta.json", json.dumps(dados))
+
+
+def test_memoria_do_claude_entra_no_plano_e_vira_proposta_com_origem(tmp_path, downloads):
+    _export(downloads, 1)
+    _memories(downloads)
+    imp, mem = _importador(tmp_path, downloads, Haiku(["Ana tem um gato chamado Mel."]), copias=[])
+    p = imp.preparar()
+    assert len(p.plano.analisar) == 2 and "memória do claude.ai" in p.frase()
+    imp.importar()
+    [prop] = imp.propostas()
+    assert prop.conversa_uuid.startswith("memoria:") and prop.conversa_titulo == "O gato do dono"
+    r = imp.aprovar(prop.id)
+    assert mem.grafo.ideia(r.ideia_id).criado_em.startswith("2026-11-15")
+
+
+def test_sem_memories_a_previa_avisa_para_baixar(tmp_path, downloads):
+    _export(downloads, 1)
+    imp, _ = _importador(tmp_path, downloads, Haiku())
+    assert "memories-000.zip" in imp.preparar().frase()
+
+
+def test_rotulo_curto_corta_a_descricao_longa_da_memoria():
+    from eco.importacao.servico import rotulo_curto
+
+    assert rotulo_curto("Investimentos do Vitor — aporte mensal de R$400, divisão entre reserva") == "Investimentos do Vitor"
+    assert rotulo_curto("Dieta (TMB/TDEE)") == "Dieta"
+    longo = rotulo_curto("Regras para decidir contestar ou descontar nos tickets de acareação da transportadora")
+    assert len(longo) <= 46 and longo.endswith("…")
+    assert rotulo_curto("") == "Sem título"
+
+
+def test_grupos_juntam_por_origem_e_rejeitar_grupo_so_mexe_naquele(tmp_path, downloads):
+    _export(downloads, 2)
+    imp, mem = _importador(tmp_path, downloads, Haiku(), copias=[])
+    imp.estado.registrar_conversa(imp_conversa("a", "Conversa A", "2026-10-02"))
+    imp.estado.registrar_conversa(imp_conversa("b", "Investimentos do Vitor — aporte mensal", "2026-10-05"))
+    a1 = imp.estado.propor("a", "Vitor tem um gato chamado Mel.")
+    imp.estado.propor("b", "Vitor investe em renda fixa.")
+    imp.estado.propor("b", "Vitor tem ações de bancos.")
+    grupos = imp.grupos()
+    assert [(g.rotulo, len(g.propostas)) for g in grupos] == [("Investimentos do Vitor", 2), ("Conversa A", 1)]
+    assert imp.rejeitar_grupo("b") == 2
+    assert [p.id for p in imp.propostas()] == [a1]
+    assert [p.estado for p in imp.estado.propostas("rejeitada")] == ["rejeitada", "rejeitada"]
+
+
+def imp_conversa(uuid, titulo, data):
+    from eco.importacao.modelo import DONO, Conversa, Mensagem
+
+    return Conversa(uuid, titulo, data + "T10:00:00Z", data + "T11:00:00Z", (Mensagem(DONO, "x"),))

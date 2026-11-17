@@ -357,3 +357,24 @@ def test_painel_do_grafo_liga_a_secao_de_importacao(tela):
     p, g, ids = tela
     p.alternar_gerenciar(True)
     assert "importacao" in p.gerenciar.secoes  # o painel do grafo liga o importador real
+
+
+def test_painel_agrupa_os_fatos_e_rejeita_um_assunto_inteiro(cfg, qapp, tmp_path, monkeypatch):
+    from PySide6.QtWidgets import QLabel
+
+    from eco.importacao.modelo import DONO, Conversa, Mensagem
+
+    p, imp, mem = _painel_importacao(cfg, qapp, tmp_path, monkeypatch, [])
+    for uuid, titulo, data in (("a", "Conversa A", "2026-10-02"), ("b", "Investimentos do Vitor — aporte mensal", "2026-10-05")):
+        imp.estado.registrar_conversa(Conversa(uuid, titulo, data + "T10:00:00Z", data, (Mensagem(DONO, "x"),)))
+    imp.estado.propor("a", "Vitor tem um gato chamado Mel.", "tenho um gato chamado Mel")
+    imp.estado.propor("b", "Vitor investe em renda fixa.")
+    imp.estado.propor("b", "Vitor tem ações de bancos.")
+    p.recarregar()
+    textos = [l.text() for l in p.secoes["importados"].findChildren(QLabel)]
+    assert any(t.startswith("Investimentos do Vitor · 2 fato(s)") for t in textos)
+    assert not any("aporte mensal" in t for t in textos)  # o grupo mostra o nome curto, não a descrição inteira
+    assert any(t.startswith("Vitor tem um gato chamado Mel.\n\"tenho um gato") for t in textos)
+    _botoes(p.secoes["importados"], "Rejeitar todos")[0].click()  # o primeiro grupo: o mais recente (investimentos)
+    assert [x.texto for x in imp.propostas()] == ["Vitor tem um gato chamado Mel."]
+    assert p.secoes["importados"].contador.text() == "1"

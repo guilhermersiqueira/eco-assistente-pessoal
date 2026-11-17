@@ -34,6 +34,8 @@ AVISO_OMITIDO = "[trecho do meio da conversa omitido]"
 def motivo_para_ignorar(c: Conversa) -> str:
     """Vazio se vale analisar; senão, o motivo em uma frase."""
     do_dono = c.do_dono()
+    if c.da_memoria:  # um assunto da memória do claude.ai já é um resumo: basta ter algum item
+        return "" if do_dono else "assunto da memória sem itens"
     if len(do_dono) < MIN_MENSAGENS_DONO:
         return f"conversa curta ({len(do_dono)} mensagem(ns) do dono)"
     if sum(len(m.texto.strip()) for m in do_dono) < MIN_CARACTERES_DONO:
@@ -43,6 +45,9 @@ def motivo_para_ignorar(c: Conversa) -> str:
 
 def _cabecalho(c: Conversa) -> str:
     data = f" ({c.criada_em[:10]})" if c.criada_em else ""
+    if c.da_memoria:
+        return (f"Memória do claude.ai sobre: {' '.join(c.titulo.split()) or 'sem título'}{data} "
+                "(cada linha \"Dono:\" é um resumo do que o dono disse em várias conversas)")
     return f"Conversa: {' '.join(c.titulo.split()) or 'sem título'}{data}"
 
 

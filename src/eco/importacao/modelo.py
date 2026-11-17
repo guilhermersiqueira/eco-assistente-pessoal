@@ -8,6 +8,7 @@ from dataclasses import dataclass
 
 DONO = "dono"
 ASSISTENTE = "assistente"
+PREFIXO_MEMORIA = "memoria:"  # uuid das "conversas" que vêm da memória do claude.ai (um assunto da memória cada)
 
 
 @dataclass(frozen=True)
@@ -24,6 +25,11 @@ class Conversa:
     criada_em: str = ""
     atualizada_em: str = ""
     mensagens: tuple[Mensagem, ...] = ()
+
+    @property
+    def da_memoria(self) -> bool:
+        """Veio de memories-NNN.zip: cada mensagem do dono é um item que o claude.ai resumiu de várias conversas."""
+        return self.uuid.startswith(PREFIXO_MEMORIA)
 
     def do_dono(self) -> list[Mensagem]:
         return [m for m in self.mensagens if m.autor == DONO and m.texto.strip()]

@@ -145,3 +145,14 @@ def test_plano_com_modelo_sem_preco_avisa_que_nao_estima(estado):
 def test_planejar_nao_grava_nada_no_estado(estado):
     filtro.planejar([_conversa("a"), _conversa("b", n_dono=1)], estado, MODELO, 2.0)
     assert estado.contagens()["pendente"] == 0 and estado.conversa("a") is None
+
+
+def test_assunto_da_memoria_nao_e_ignorado_por_ser_curto():
+    from eco.importacao.modelo import PREFIXO_MEMORIA
+
+    m = Conversa(PREFIXO_MEMORIA + "/areas/gato.md", "O gato do dono", "2026-11-01", "2026-11-01", (Mensagem(DONO, "Tem um gato"),))
+    assert filtro.motivo_para_ignorar(m) == ""
+    [parte] = filtro.dividir(m)
+    assert parte.startswith("Memória do claude.ai sobre: O gato do dono") and "Dono: Tem um gato" in parte
+    vazio = Conversa(PREFIXO_MEMORIA + "/x.md", "x", "", "", ())
+    assert filtro.motivo_para_ignorar(vazio)

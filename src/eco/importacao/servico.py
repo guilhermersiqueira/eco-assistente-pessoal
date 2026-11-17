@@ -18,7 +18,8 @@ from eco.importacao.aprovacao import Aprovador, Resultado
 from eco.importacao.conferencia import Conferencia
 from eco.importacao.estado import Importacoes, Proposta
 from eco.importacao.extrator import Extrator, lembrancas_da_memoria
-from eco.importacao.leitor import ExportInvalido, Leitura, ler_export, localizar_export
+from eco.importacao.modelo import PREFIXO_MEMORIA
+from eco.importacao.leitor import ExportInvalido, Leitura, ler_export, ler_memorias, localizar_export
 
 
 @dataclass
@@ -43,6 +44,27 @@ class Previa:
         if self.avisos:
             texto += " " + " ".join(self.avisos)
         return texto
+
+
+def rotulo_curto(titulo: str, limite: int = 45) -> str:
+    """Nome curto para o grupo na revisão: a descrição de um assunto da memória costuma ser uma frase longa ("Investimentos
+    do Vitor — aporte mensal de..."); fica o começo, até o primeiro travessão, parêntese ou dois-pontos."""
+    t = " ".join((titulo or "").split())
+    for corte in (" — ", " – ", " - ", " (", ": "):
+        if corte in t:
+            t = t.split(corte)[0]
+    if len(t) > limite:
+        t = t[:limite].rsplit(" ", 1)[0].rstrip(",;") + "…"
+    return t or "Sem título"
+
+
+@dataclass
+class Grupo:
+    uuid: str  # da conversa ou do assunto da memória
+    rotulo: str
+    data: str
+    da_memoria: bool
+    propostas: list[Proposta] = field(default_factory=list)
 
 
 class Importador:
@@ -106,6 +128,16 @@ class Importador:
                 previa.avisos = list(export.avisos)
                 previa.leitura = ler_export(export.arquivos)
                 previa.avisos += list(previa.leitura.avisos)
+                if export.memorias:
+                    memoria = ler_memorias(export.memorias)
+                    previa.leitura.conversas.extend(memoria.conversas)
+                    previa.avisos += list(memoria.avisos)
+                    if memoria.conversas:
+                        previa.avisos.append(f"Inclui a memória do claude.ai: {len(memoria.conversas)} assunto(s), contados "
+                                             "entre as conversas acima.")
+                else:
+                    previa.avisos.append("Não achei o memories-000.zip do mesmo export: baixe-o também para trazer a memória "
+                                         "que o claude.ai guarda de você.")
                 previa.plano = filtro.planejar(previa.leitura.conversas, self.estado, self.cfg.modelo_grafo, self.cfg.importar_teto_usd)
         except ExportInvalido as erro:
             previa.erro = str(erro)
@@ -150,6 +182,24 @@ class Importador:
         """As propostas pendentes, da conversa mais recente para a mais antiga. As ainda sem conferência (texto editado,
         conferência interrompida) entram: aprovar confere de novo antes de gravar."""
         return sorted(self.estado.propostas("pendente"), key=lambda p: p.conversa_data, reverse=True)
+
+    def grupos(self) -> list[Grupo]:
+        """As propostas pendentes juntas por origem (uma conversa ou um assunto da memória), a origem mais recente primeiro."""
+        por_origem: dict[str, Grupo] = {}
+        for p in self.propostas():
+            g = por_origem.get(p.conversa_uuid)
+            if g is None:
+                g = por_origem[p.conversa_uuid] = Grupo(p.conversa_uuid, rotulo_curto(p.conversa_titulo), p.conversa_data,
+                                                        p.conversa_uuid.startswith(PREFIXO_MEMORIA))
+            g.propostas.append(p)
+        return list(por_origem.values())
+
+    def rejeitar_grupo(self, conversa_uuid: str) -> int:
+        """Rejeita de uma vez todas as propostas pendentes de uma origem. Devolve quantas."""
+        ids = [p.id for p in self.propostas() if p.conversa_uuid == conversa_uuid]
+        for id_ in ids:
+            self.aprovador().rejeitar(id_)
+        return len(ids)
 
     def sem_conferencia(self) -> int:
         return len(self.estado.sem_conferencia())

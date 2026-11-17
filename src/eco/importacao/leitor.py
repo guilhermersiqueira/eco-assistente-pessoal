@@ -7,6 +7,12 @@ e, por categoria, arquivos `.zip` numerados (`conversations-000.zip`, `memories-
 ("human" ou "assistant"), `text`, `created_at`, `content` (blocos: texto, ferramentas, raciocínio, imagens), `attachments`
 e `files`. Também aceitamos o formato antigo (um `.zip` único com `conversations.json`) e o `conversations.json` solto.
 
+`memories-NNN.zip` (baixado junto) traz a memória que o claude.ai guarda do dono: `memories/<conta>.json` com
+`memory_files` (um arquivo por assunto: `path`, `content` em Markdown com cabeçalho `name`/`description` e itens
+"- [stated] texto [s:id]", `updated_at`) e `conversations_memory` (um resumo corrido, em inglês, que repete os mesmos
+assuntos e é ignorado). Cada assunto vira uma `Conversa` de uuid "memoria:<path>", com um item por mensagem do dono, e
+segue o mesmo caminho das conversas (extração, conferência, revisão).
+
 O que entra na `Conversa`: só as mensagens com texto em `text`, do dono ("human") e da IA ("assistant"). Ficam de fora o
 raciocínio da IA, as chamadas de ferramentas, os blocos injetados pelo sistema e o conteúdo extraído de anexos (são
 documentos colados ou enviados, quase sempre de terceiros). Nada é extraído para o disco e os arquivos nunca são
@@ -17,12 +23,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import zipfile
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
-from eco.importacao.modelo import ASSISTENTE, DONO, Conversa, Mensagem
+from eco.importacao.modelo import ASSISTENTE, DONO, PREFIXO_MEMORIA, Conversa, Mensagem
 
 JANELA_SEGUNDOS = 24 * 3600  # partes de um mesmo export são baixadas juntas (o link expira em 24 h)
 MAX_BYTES_JSON = 500 * 1024 * 1024  # recusa um conversations.json maior que isso (zip malformado ou enorme)
@@ -43,6 +50,7 @@ class Export:
     faltando: list[str] = field(default_factory=list)  # partes que o manifesto lista e não estão na pasta
     avisos: list[str] = field(default_factory=list)
     desatualizado: bool = False  # há um manifesto bem mais novo cujos arquivos ainda não foram baixados
+    memorias: list[Path] = field(default_factory=list)  # memories-NNN.zip baixados junto com as conversas
 
     @property
     def baixado_em(self) -> datetime:
@@ -104,6 +112,8 @@ def localizar_export(pastas: list[Path] | None = None) -> Export | None:
     else:
         arquivos = [novo]
     export = Export(arquivos)
+    export.memorias = sorted((p for p in novo.parent.glob("memories-*.zip") if p.is_file()
+                              and abs(p.stat().st_mtime - novo.stat().st_mtime) <= JANELA_SEGUNDOS), key=lambda p: p.name)
     manifestos = [m for m in novo.parent.glob("manifest-*.json")
                   if m.is_file() and abs(m.stat().st_mtime - novo.stat().st_mtime) <= JANELA_SEGUNDOS]
     if manifestos:
@@ -219,3 +229,78 @@ def ler_export(arquivos: list[Path]) -> Leitura:
     if not por_id:
         avisos.append("O arquivo não tem nenhuma conversa.")
     return Leitura(list(por_id.values()), list(arquivos), _hash_dos_arquivos(list(arquivos)), invalidas, avisos)
+
+
+# --- memória do claude.ai (memories-NNN.zip) ----------------------------------------------------------------------------
+_ITEM = re.compile(r"^-\s+(?:\[[\w-]+\]\s*)?(.*)$")
+_FONTE = re.compile(r"\s*\[s:[0-9a-fA-F]+\]")
+
+
+def _cabecalho_md(conteudo: str) -> tuple[dict[str, str], str]:
+    """Separa o cabeçalho (--- nome: valor ---) do corpo."""
+    linhas = conteudo.splitlines()
+    if not linhas or linhas[0].strip() != "---":
+        return {}, conteudo
+    campos: dict[str, str] = {}
+    for n, linha in enumerate(linhas[1:], 1):
+        if linha.strip() == "---":
+            return campos, "\n".join(linhas[n + 1:])
+        chave, _, valor = linha.partition(":")
+        campos[chave.strip()] = valor.strip()
+    return {}, conteudo
+
+
+def itens_da_memoria(conteudo: str) -> list[str]:
+    """Os itens ("- [stated] texto [s:id]") de um arquivo de memória, sem a marca e sem a fonte."""
+    _campos, corpo = _cabecalho_md(conteudo)
+    itens = []
+    for linha in corpo.splitlines():
+        m = _ITEM.match(linha.strip())
+        if m:
+            texto = " ".join(_FONTE.sub("", m.group(1)).split())
+            if texto:
+                itens.append(texto)
+    return itens
+
+
+def _assunto(d: object) -> Conversa | None:
+    if not isinstance(d, dict) or not isinstance(d.get("path"), str) or not isinstance(d.get("content"), str):
+        return None
+    campos, _ = _cabecalho_md(d["content"])
+    quando = str(d.get("updated_at") or "")
+    itens = itens_da_memoria(d["content"])
+    titulo = " ".join((campos.get("description") or campos.get("name") or d["path"]).split())[:120]
+    return Conversa(PREFIXO_MEMORIA + d["path"].strip(), titulo, quando, quando, tuple(Mensagem(DONO, i, quando) for i in itens))
+
+
+def ler_memorias(arquivos: list[Path]) -> Leitura:
+    """Os assuntos da memória do claude.ai como conversas. Um arquivo ilegível vira aviso, não erro: a memória é um
+    complemento, e as conversas continuam podendo ser importadas sem ela."""
+    assuntos: dict[str, Conversa] = {}
+    avisos: list[str] = []
+    invalidos = 0
+    for caminho in arquivos:
+        try:
+            with zipfile.ZipFile(caminho) as z:
+                for info in z.infolist():
+                    if not info.filename.lower().endswith(".json"):
+                        continue
+                    if info.file_size > MAX_BYTES_JSON:
+                        avisos.append(f"{info.filename} em {caminho.name} é grande demais para ler.")
+                        continue
+                    with z.open(info) as f:
+                        dados = json.loads(f.read(MAX_BYTES_JSON + 1).decode("utf-8"))
+                    arquivos_de_memoria = dados.get("memory_files") if isinstance(dados, dict) else None
+                    if not isinstance(arquivos_de_memoria, list):
+                        continue
+                    for item in arquivos_de_memoria:
+                        c = _assunto(item)
+                        if c is None:
+                            invalidos += 1
+                        elif c.uuid not in assuntos or c.atualizada_em > assuntos[c.uuid].atualizada_em:
+                            assuntos[c.uuid] = c
+        except (zipfile.BadZipFile, OSError, UnicodeDecodeError, json.JSONDecodeError) as erro:
+            avisos.append(f"Não consegui ler a memória em {caminho.name} ({type(erro).__name__}); sigo só com as conversas.")
+    if invalidos:
+        avisos.append(f"{invalidos} assunto(s) da memória estavam fora do formato e foram ignorados.")
+    return Leitura(list(assuntos.values()), list(arquivos), _hash_dos_arquivos(list(arquivos)) if arquivos else "", invalidos, avisos)

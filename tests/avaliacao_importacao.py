@@ -6,7 +6,7 @@ saberem o que a Eco já sabe. O gasto vai para ~/.eco/uso.jsonl na categoria "im
 
 O resultado fica em ~/.eco/ensaio-importacao.txt (fora do repositório: traz trechos das conversas do dono).
 
-Rodar:  py -m uv run --no-sync python tests/avaliacao_importacao.py --gastar [--max N] [--so "parte do título"] [--saida arquivo]
+Rodar:  py -m uv run --no-sync python tests/avaliacao_importacao.py --gastar [--max N] [--so "parte do título"] [--sem-memoria] [--saida arquivo]
 """
 
 from __future__ import annotations
@@ -36,7 +36,7 @@ def main() -> int:
     from eco.importacao.conferencia import Conferencia
     from eco.importacao.estado import Importacoes
     from eco.importacao.extrator import Extrator, lembrancas_da_memoria
-    from eco.importacao.leitor import ler_export, localizar_export
+    from eco.importacao.leitor import ler_export, ler_memorias, localizar_export
     from eco.uso import IMPORTACAO, RegistroUso
 
     cfg = carregar_config()
@@ -46,6 +46,8 @@ def main() -> int:
         print("Não achei nenhum export de conversas em Downloads.")
         return 1
     leitura = ler_export(export.arquivos)
+    if export.memorias and "--sem-memoria" not in sys.argv:  # os assuntos da memória do claude.ai entram como conversas
+        leitura.conversas.extend(ler_memorias(export.memorias).conversas)
     reais = memoria.fatos(cfg.pasta_dados)  # só leitura
     linhas = [f"Export: {', '.join(a.name for a in export.arquivos)} (baixado em {export.baixado_em:%d/%m/%Y %H:%M})",
               *export.avisos, f"Lembranças reais lidas do memoria.md: {len(reais)}"]

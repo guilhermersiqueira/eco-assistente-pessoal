@@ -50,11 +50,16 @@ NÃO devolva:
 - tarefas pontuais e perguntas do dia a dia (receitas, dúvidas técnicas, o código ou o texto que ele pediu);
 - requisitos, pedidos de funcionalidade e detalhes técnicos de um software ou de uma planilha (basta dizer que o projeto existe e para que serve);
 - coisas que só a IA disse: use apenas o que o dono escreveu ou confirmou;
-- dados de terceiros (e-mails, telefones, documentos de outras pessoas) e dados sensíveis (senhas, números de documentos, números de contas);
+- dados de terceiros (e-mails, telefones, documentos de outras pessoas, nomes de colegas, clientes ou funcionários) e dados sensíveis (senhas, números de documentos, números de contas, endereços de planilhas ou sites privados);
+- regras, passo a passo e formatos de relatórios ou planilhas do trabalho (basta dizer qual é o trabalho e o que ele faz);
+- o funcionamento da própria assistente (Eco ou Echo): ela já sabe como foi feita;
 - o que já consta nas "LEMBRANÇAS ATUAIS" ou nos "JÁ PROPOSTOS", mesmo com outras palavras.
 
+Se o texto for uma "Memória do claude.ai", cada linha "Dono:" é um resumo que outra IA fez do que o dono disse em várias conversas: trate como dito por ele, aplique as mesmas exclusões e, se a linha estiver em inglês, escreva o fato em português (o "trecho" continua sendo a linha original).
+
 Regras:
-- JUNTE fatos do mesmo assunto em um só quando couberem numa frase (uma carteira de investimentos é um fato, não dez);
+- JUNTE fatos do mesmo assunto em um só quando couberem numa frase (uma carteira de investimentos é um fato, não dez); nunca devolva dois fatos sobre o mesmo relatório, planilha ou projeto;
+- TRABALHO: no máximo UM fato por conversa sobre o trabalho do dono, dizendo onde ele trabalha e de que ele cuida (ex.: "Vitor cuida do cadastro de entregadores e do relatório de pedidos retidos na empresa X"); se as lembranças atuais ou os já propostos já dizem que ele faz aquilo, não devolva nada sobre trabalho;
 - um fato por item, curto e específico, em terceira pessoa e com o MESMO sujeito das lembranças atuais: se elas dizem "Vitor", escreva "Vitor", nunca "o dono"; se não houver lembranças, comece por "O dono";
 - "trecho": copie, quase literalmente, a frase do dono que sustenta o fato;
 - "duracao": "permanente" (não muda, como o nome de um parente), "duradoura" (vale por meses ou anos, como um projeto ou um hábito) ou "temporaria" (passa logo, como um processo seletivo em andamento ou uma prova da semana). Para "temporaria", se a conversa der uma data limite, ponha em "validade" (AAAA-MM-DD); senão deixe vazio;
@@ -149,7 +154,8 @@ def interpretar(texto: str, parte: str = "") -> list[FatoProposto]:
         if not MIN_CARACTERES_FATO <= len(fato) <= MAX_CARACTERES_FATO or chave_do_fato(fato) in vistos:
             continue
         vistos.add(chave_do_fato(fato))
-        trecho = " ".join(str(item.get("trecho") or "").split())[:MAX_CARACTERES_TRECHO]
+        trecho = " ".join(str(item.get("trecho") or "").split())
+        trecho = re.sub(r"^(Dono|Assistente)\s*:\s*", "", trecho)[:MAX_CARACTERES_TRECHO]  # o modelo às vezes copia o rótulo da linha
         if parte and not _trecho_confere(trecho, parte):
             trecho = ""
         duracao = _sem_acento(str(item.get("duracao") or "")).strip()
@@ -195,7 +201,9 @@ class Extrator:
             novos: list[FatoProposto] = []
             for tentativa in range(2):
                 try:
-                    r = self.completador.completar(PROMPT, self._usuario(parte, lembrancas, propostos))
+                    # a segunda parte vê o que a primeira já propôs: sem isso cada parte traz o seu fato sobre o mesmo assunto
+                    ja = [*(propostos or []), *(f.texto for f in fatos)]
+                    r = self.completador.completar(PROMPT, self._usuario(parte, lembrancas, ja))
                     custo += r.custo
                     novos = interpretar(r.texto, parte)
                     break

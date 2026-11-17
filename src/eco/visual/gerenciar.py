@@ -35,7 +35,7 @@ class _Sinais(QObject):
     progresso = Signal(str)
 
 
-MAX_FATOS_NA_TELA = 8  # fatos importados mostrados por vez na revisão
+MAX_FATOS_NA_TELA = 12  # fatos importados mostrados por vez na revisão (em grupos inteiros: pode passar um pouco)
 ENSAIO_CONVERSAS = 10  # o "ensaio" da importação: só as 10 conversas mais recentes
 
 
@@ -251,36 +251,66 @@ class PainelGerenciar(QScrollArea):
             max_conversas, ao_progresso=self._sinais.progresso.emit, parar=self._parar_importacao.is_set), importacao=True)
 
     def _revisao_importados(self) -> None:
+        """Os fatos juntos por origem (conversa ou assunto da memória), cada grupo com "Rejeitar todos"; texto curto."""
         if self._importador_fabrica is None:
             return
         imp = self.importador()
-        lista = imp.propostas()
-        if not lista:
+        grupos = imp.grupos()
+        total = sum(len(g.propostas) for g in grupos)
+        if not total:
             return
-        c = self._secao("importados", "Fatos importados para revisar", len(lista))
-        self._texto(c, "Aprove só o que é verdade e vale lembrar. Aprovados ficam fora do prompt fixo: a Eco os traz quando o "
-                       "assunto aparece.", True)
-        for p in lista[:MAX_FATOS_NA_TELA]:
-            data = p.conversa_data[:10]
-            dura = {"permanente": "permanente", "duradoura": "duradouro", "temporaria": "temporário"}.get(p.duracao, "")
-            if p.validade:
-                dura += f" até {p.validade}"
-            texto = f"{p.texto}\nConversa \"{p.conversa_titulo[:50]}\" ({data})" + (f" · {dura}" if dura else "")
-            texto += f"\nVocê disse: \"{p.trecho}\"" if p.trecho else "\n(sem citação confirmada: confira com cuidado)"
-            if p.com_conflito:
-                verbo = "parece ser a versão nova de" if p.conflito_relacao == "atualiza" else "contradiz"
-                texto += f"\nJÁ EXISTE na memória: \"{p.conflito_texto}\" — este fato {verbo} ela. {p.conflito_motivo}".rstrip()
-            botoes = []
-            if p.com_conflito:
-                botoes += [("Substituir a antiga", lambda p=p: self._aprovar_importado(p, substituir=True), "principal"),
-                           ("Manter as duas", lambda p=p: self._aprovar_importado(p, mesmo_assim=True), "normal")]
-            else:
-                botoes.append(("Aprovar", lambda p=p: self._aprovar_importado(p), "principal"))
-            botoes += [("Editar", lambda p=p: self._editar_importado(p), "normal"),
-                       ("Rejeitar", lambda p=p: self._rejeitar_importado(p), "normal")]
-            self._linha(c, texto, botoes)
-        if len(lista) > MAX_FATOS_NA_TELA:
-            self._texto(c, f"E mais {len(lista) - MAX_FATOS_NA_TELA}. Eles aparecem conforme você decide estes.", True)
+        c = self._secao("importados", "Fatos importados para revisar", total)
+        self._texto(c, "Aprove só o que é verdade e vale lembrar. Um assunto inteiro que não interessa sai com \"Rejeitar todos\".",
+                    True)
+        mostrados = 0
+        for g in grupos:
+            if mostrados >= MAX_FATOS_NA_TELA:
+                break
+            origem = "memória" if g.da_memoria else "conversa"
+            cab = self._linha(c, f"{g.rotulo} · {len(g.propostas)} fato(s) · {origem} de {g.data[:10]}",
+                              [("Rejeitar todos", lambda g=g: self._rejeitar_grupo(g), "normal")])
+            rotulo = cab.findChild(QLabel)
+            fonte = rotulo.font()
+            fonte.setBold(True)
+            rotulo.setFont(fonte)
+            for p in g.propostas:
+                self._linha(c, self._texto_do_fato(p), self._botoes_do_fato(p))
+                mostrados += 1
+        if total > mostrados:
+            self._texto(c, f"E mais {total - mostrados} fato(s) em outros assuntos. Eles aparecem conforme você decide estes.", True)
+
+    @staticmethod
+    def _texto_do_fato(p) -> str:
+        texto = p.texto
+        extras = []
+        if p.duracao == "temporaria":
+            extras.append("temporário" + (f" até {p.validade}" if p.validade else ""))
+        if p.trecho:
+            trecho = p.trecho if len(p.trecho) <= 90 else p.trecho[:90].rsplit(" ", 1)[0] + "…"
+            extras.append(f"\"{trecho}\"")
+        else:
+            extras.append("sem citação: confira")
+        texto += "\n" + " · ".join(extras)
+        if p.com_conflito:
+            verbo = "atualiza" if p.conflito_relacao == "atualiza" else "contradiz"
+            texto += f"\n{verbo.upper()} a lembrança: \"{p.conflito_texto}\""
+        return texto
+
+    def _botoes_do_fato(self, p) -> list:
+        if p.com_conflito:
+            botoes = [("Substituir a antiga", lambda p=p: self._aprovar_importado(p, substituir=True), "principal"),
+                      ("Manter as duas", lambda p=p: self._aprovar_importado(p, mesmo_assim=True), "normal")]
+        else:
+            botoes = [("Aprovar", lambda p=p: self._aprovar_importado(p), "principal")]
+        return botoes + [("Editar", lambda p=p: self._editar_importado(p), "normal"),
+                         ("Rejeitar", lambda p=p: self._rejeitar_importado(p), "normal")]
+
+    def _rejeitar_grupo(self, g) -> Any:
+        if not self.confirmar("Rejeitar assunto", f"Rejeitar os {len(g.propostas)} fato(s) de \"{g.rotulo}\"? Eles não voltam nas "
+                                                   "próximas importações."):
+            return False
+        n = self.importador().rejeitar_grupo(g.uuid)
+        return f"{n} fato(s) de \"{g.rotulo}\" rejeitado(s)."
 
     def _aprovar_importado(self, p, texto: str | None = None, substituir: bool = False, mesmo_assim: bool = False) -> Any:
         from eco.importacao.aprovacao import ConflitoPendente

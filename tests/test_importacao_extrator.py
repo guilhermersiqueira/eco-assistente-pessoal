@@ -292,7 +292,7 @@ def test_duracao_e_validade_sao_lidas_e_validadas():
 
 def test_prompt_pede_duracao_agrupar_e_o_mesmo_sujeito():
     p = extrator.PROMPT
-    for trecho in ("duracao", "temporaria", "JUNTE", "MESMO sujeito", "Não deduza", "requisitos", "JÁ PROPOSTOS"):
+    for trecho in ("duracao", "temporaria", "JUNTE", "MESMO sujeito", "Não deduza", "requisitos", "JÁ PROPOSTOS", "TRABALHO", "UM fato por conversa", "Memória do claude.ai"):
         assert trecho in p
 
 
@@ -320,3 +320,17 @@ def test_o_que_o_dono_rejeitou_ou_deixou_pendente_antes_tambem_vai_no_contexto(e
     _extrator(estado, modelo).executar([_conversa("b", titulo="Outra")])
     contexto = modelo.chamadas[0][1].split("JÁ PROPOSTOS:")[1].split("CONVERSA:")[0]
     assert "Vitor gosta de café." in contexto and "Vitor tem um gato." in contexto
+
+
+def test_trecho_copiado_com_o_rotulo_da_linha_perde_o_rotulo():
+    [f] = interpretar(json.dumps(_fatos(("O dono faz a landing page da padaria do tio.", "Dono: " + FRASE))), PARTE)
+    assert f.trecho == FRASE
+
+
+def test_a_segunda_parte_da_conversa_ve_o_que_a_primeira_propos(estado):
+    c = _conversa(n=40, tamanho=500)
+    modelo = Modelo(_fatos(("Vitor cuida do cadastro de motoristas da CSM.", "")), _fatos())
+    _extrator(estado, modelo).executar([c])
+    assert len(modelo.chamadas) == 2
+    assert "JÁ PROPOSTOS:\n(nenhuma)" in modelo.chamadas[0][1]
+    assert "JÁ PROPOSTOS:\n- Vitor cuida do cadastro de motoristas da CSM." in modelo.chamadas[1][1]
