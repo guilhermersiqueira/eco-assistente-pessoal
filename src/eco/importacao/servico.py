@@ -106,8 +106,9 @@ class Importador:
         from eco.grafo.higiene import Higiene
         from eco.uso import IMPORTACAO
 
-        # sem teto próprio: o teto que vale é o da importação (a conferência confere)
-        return Higiene(self.grafo, self._completador_fabrica(IMPORTACAO, 1500), self.semelhanca(), memorias=self.memorias)
+        # sem teto próprio: o teto que vale é o da importação (a conferência confere), e o gasto não conta no teto do grafo
+        return Higiene(self.grafo, self._completador_fabrica(IMPORTACAO, 1500), self.semelhanca(), memorias=self.memorias,
+                       conta_no_teto=False)  # o gasto da importação não entra no teto mensal do grafo
 
     def aprovador(self) -> Aprovador:
         if self._aprovador is None:

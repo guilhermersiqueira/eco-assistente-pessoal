@@ -217,3 +217,11 @@ def imp_conversa(uuid, titulo, data):
     from eco.importacao.modelo import DONO, Conversa, Mensagem
 
     return Conversa(uuid, titulo, data + "T10:00:00Z", data + "T11:00:00Z", (Mensagem(DONO, "x"),))
+
+
+def test_gasto_da_conferencia_nao_entra_no_teto_mensal_do_grafo(tmp_path, downloads):
+    _export(downloads, 2)
+    imp, mem = _importador(tmp_path, downloads, Haiku([FATO], custo=0.01), copias=[])
+    imp.preparar()
+    imp.importar()
+    assert imp.estado.propostas() and mem.grafo.gasto_do_mes() == 0.0  # extração e conferência gastaram, mas fora do teto do grafo

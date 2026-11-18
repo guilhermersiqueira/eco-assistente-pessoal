@@ -137,8 +137,9 @@ Responda só com JSON: {"grupos": [{"n": 1, "agrupar": true, "nome": "...", "mot
 
 class Higiene:
     def __init__(self, grafo: Grafo, completador: Any = None, semelhanca=None, memorias=None,
-                 teto_usd: float | None = None) -> None:
+                 teto_usd: float | None = None, conta_no_teto: bool = True) -> None:
         self.grafo, self.completador, self.memorias, self.teto_usd = grafo, completador, memorias, teto_usd
+        self.conta_no_teto = conta_no_teto  # False: o gasto tem teto próprio (importação) e não consome o teto mensal do grafo
         if semelhanca is None:
             from eco.grafo.semelhanca import Semelhanca
 
@@ -152,7 +153,8 @@ class Higiene:
 
     def _perguntar(self, sistema: str, usuario: str) -> tuple[Any, float]:
         r = self.completador.completar(sistema, usuario)
-        self.grafo.somar_gasto(r.custo)
+        if self.conta_no_teto:
+            self.grafo.somar_gasto(r.custo)
         return _json(r.texto), r.custo
 
     # --- 1. escrita (19.6.3) ---------------------------------------------------------------------------------------
