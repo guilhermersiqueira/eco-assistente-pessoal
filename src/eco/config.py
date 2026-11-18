@@ -67,13 +67,13 @@ class Config:
     grafo_qualidade: str = "medio"  # baixo, medio ou alto (cai sozinho se a tela ficar lenta)
     # Preço da OpenAI por minuto de áudio, para a estimativa do `eco gasto` e do orçamento (que soma Claude e OpenAI).
     # Transcrição: estimativa oficial da página de preços da OpenAI (gpt-4o-mini-transcribe, US$ 0,003/min, 11/2026).
-    # Fala: a página não dá valor por minuto (cobra US$ 12 por milhão de tokens de áudio); 0,015 é um ponto de partida
-    # a calibrar com o painel de uso da OpenAI (ECO_PRECO_FALA_MIN).
+    # Fala: a página não dá valor por minuto (cobra US$ 12 por milhão de tokens de áudio); 0,017 vem da calibração de 17/11/2026
+    # (painel da OpenAI: US$ 0,98 no total de 11 a 17/11, menos ~US$ 0,09 de transcrição, para 51,7 min de fala).
     backup_horas: float = 24  # backup automático do eco.db a cada tantas horas (0 desliga)
     backup_manter: int = 14  # quantas cópias automáticas guardar (manuais e de antes de operações nunca são apagadas)
     filtro_voz: bool = True  # Silero VAD descarta gravação sem voz antes da transcrição (ECO_FILTRO_VOZ=nao desliga)
     preco_transcricao_min: float = 0.003
-    preco_fala_min: float = 0.015
+    preco_fala_min: float = 0.017
     fundo: str = "medio"  # partículas de fundo da janela principal: desligado, baixo, medio ou alto
 
 
@@ -154,7 +154,7 @@ def carregar_config() -> Config:
         backup_horas=float(env("ECO_BACKUP_HORAS", "24")),
         backup_manter=int(env("ECO_BACKUP_MANTER", "14")),
         preco_transcricao_min=float(env("ECO_PRECO_TRANSCRICAO_MIN", "0.003")),
-        preco_fala_min=float(env("ECO_PRECO_FALA_MIN", "0.015")),
+        preco_fala_min=float(env("ECO_PRECO_FALA_MIN", "0.017")),
         sons=env("ECO_SONS", "sim").strip().lower() not in ("nao", "não", "0", "false"),
         modo=env("ECO_MODO", "voz"),
         porcupine_chave=env("PORCUPINE_ACCESS_KEY") or None,

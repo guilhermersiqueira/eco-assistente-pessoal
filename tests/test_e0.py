@@ -191,7 +191,7 @@ def cfg_voz(tmp_path, monkeypatch):
 
 
 def test_precos_da_openai_vem_da_configuracao(cfg_voz, monkeypatch):
-    assert cfg_voz.preco_transcricao_min == 0.003 and cfg_voz.preco_fala_min == 0.015
+    assert cfg_voz.preco_transcricao_min == 0.003 and cfg_voz.preco_fala_min == 0.017
     monkeypatch.setenv("ECO_PRECO_FALA_MIN", "0.02")
     from eco.config import carregar_config
 
