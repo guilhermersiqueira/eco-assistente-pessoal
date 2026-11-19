@@ -31,6 +31,8 @@ QUADROS_S_REAGINDO = 60  # ouvindo e falando: a orbe segue o volume, precisa de 
 QUADROS_S_CALMO = 30  # pensando, confirmando, legenda, erro, mudo: o movimento é lento, 30 bastam
 REAGE_AO_VOLUME = ("listen", "speak")
 TEMPO_LEGENDA = 6.0
+VERSAO_POSICAO = 2  # 2 = centro embaixo (18/11/2026): posições salvas antes disso são ignoradas uma vez
+MARGEM_BAIXO = 24  # distância da orbe (com a legenda) até a barra de tarefas
 PREPARAR_INTERFACE_MS = 3000  # a janela principal é montada escondida logo depois de a Eco abrir
 
 
@@ -109,7 +111,11 @@ def _ler_estado() -> dict:
 
 
 def _ler_posicao() -> tuple[int, int] | None:
+    """Posição salva pelo dono. Uma gravada antes do centro embaixo (sem `versao_posicao`) não vale: a orbe vai uma
+    vez para o novo lugar padrão e, dali em diante, onde ele a deixar."""
     d = _ler_estado()
+    if d.get("versao_posicao") != VERSAO_POSICAO:
+        return None
     try:
         return int(d["x"]), int(d["y"])
     except Exception:
@@ -119,7 +125,7 @@ def _ler_posicao() -> tuple[int, int] | None:
 def _gravar_posicao(x: int, y: int, tamanho: str | None = None) -> None:
     try:
         d = _ler_estado()
-        d.update(x=x, y=y)
+        d.update(x=x, y=y, versao_posicao=VERSAO_POSICAO)
         if tamanho:
             d["tamanho"] = tamanho
         _arquivo_posicao().parent.mkdir(parents=True, exist_ok=True)
@@ -237,9 +243,26 @@ class JanelaOrbe(QWidget):
         return round(1000 / alvo)
 
     # --- entradas -------------------------------------------------------------------------
-    def _posicao_padrao(self) -> tuple[int, int]:
-        tela = QGuiApplication.primaryScreen().availableGeometry()
-        return tela.right() - self.width() - 24, tela.bottom() - self.height() - 24
+    def _tela(self) -> QRect:
+        """Área útil (sem a barra de tarefas) da tela onde a orbe está."""
+        tela = QGuiApplication.screenAt(self.geometry().center()) or QGuiApplication.primaryScreen()
+        return tela.availableGeometry()
+
+    def _posicao_padrao(self, tela: QRect | None = None) -> tuple[int, int]:
+        """Centro horizontal, embaixo: a orbe e a legenda logo acima da barra de tarefas."""
+        tela = tela or QGuiApplication.primaryScreen().availableGeometry()
+        return tela.x() + (tela.width() - self.width()) // 2, tela.y() + tela.height() - self.height() - MARGEM_BAIXO
+
+    def na_posicao_padrao(self) -> bool:
+        x, y = self._posicao_padrao(self._tela())
+        return abs(self.x() - x) <= 2 and abs(self.y() - y) <= 2
+
+    def voltar_ao_centro(self) -> None:
+        """Menu "Voltar ao centro": centro embaixo da tela onde a orbe está, e grava."""
+        if self.tela_cheia:
+            return
+        self.move(*self._posicao_padrao(self._tela()))
+        _gravar_posicao(self.x(), self.y())
 
     def definir_estado(self, nome: str) -> None:
         if nome in ESTADOS_VALIDOS:
@@ -436,13 +459,17 @@ class JanelaOrbe(QWidget):
         if novo == self.lado_normal:
             return
         centro = self.geometry().center()  # cresce e encolhe em torno do mesmo ponto
+        no_padrao = self.na_posicao_padrao()  # no centro embaixo: continua lá (base fixa), em vez de crescer para baixo
         self.lado_normal = novo
         self._configurar_desenho(novo, novo // 2)
         self.centro = (novo / 2, novo / 2)
         self.setFixedSize(novo, novo + ALTURA_LEGENDA)
         tela = (QGuiApplication.screenAt(centro) or QGuiApplication.primaryScreen()).availableGeometry()
-        x = max(tela.left(), min(centro.x() - self.width() // 2, tela.right() - self.width()))
-        y = max(tela.top(), min(centro.y() - self.height() // 2, tela.bottom() - self.height()))
+        if no_padrao:
+            x, y = self._posicao_padrao(tela)
+        else:
+            x = max(tela.left(), min(centro.x() - self.width() // 2, tela.right() - self.width()))
+            y = max(tela.top(), min(centro.y() - self.height() // 2, tela.bottom() - self.height()))
         self.move(int(x), int(y))
         _gravar_posicao(self.x(), self.y(), nome)
 
@@ -536,7 +563,10 @@ class JanelaOrbe(QWidget):
         a_tela = sub.addAction("Tela cheia")
         a_tela.setCheckable(True)
         a_tela.setChecked(self.tela_cheia)
+        a_centro = None
         if not self.tela_cheia:
+            a_centro = menu.addAction("Voltar ao centro")
+            a_centro.setEnabled(not self.na_posicao_padrao())
             a_pos = menu.addAction("Mover (Ctrl + arrastar)")
             a_pos.setEnabled(False)
         a_sair = menu.addAction("Sair")
@@ -551,6 +581,8 @@ class JanelaOrbe(QWidget):
             self.painel.pedido_repetir.set()
         elif r is a_tela:
             self.alternar_tela_cheia()
+        elif a_centro is not None and r is a_centro:
+            self.voltar_ao_centro()
         elif r in escolhas:
             self.definir_tamanho(escolhas[r])
         elif r is a_sair:

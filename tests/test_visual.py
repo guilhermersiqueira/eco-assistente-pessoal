@@ -157,6 +157,40 @@ def test_orbe_so_muda_a_opacidade_quando_precisa_e_a_taxa_segue_o_estado(cfg, mo
     assert janela.quadro is not antes
 
 
+def test_orbe_fica_no_centro_embaixo_e_ignora_a_posicao_antiga_uma_vez(cfg, monkeypatch, tmp_path):
+    import json
+
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    monkeypatch.delenv("ECO_ORBE_TAMANHO", raising=False)
+    arquivo = tmp_path / "orbe.json"
+    arquivo.write_text(json.dumps({"x": 7, "y": 9, "tamanho": "pequeno"}), encoding="utf-8")  # gravado antes do centro
+    monkeypatch.setattr("eco.visual.janela._arquivo_posicao", lambda: arquivo)
+    from PySide6.QtGui import QGuiApplication
+
+    from eco.config import TAMANHOS_ORBE
+    from eco.visual.janela import MARGEM_BAIXO, abrir_janela
+
+    app, janela, painel = abrir_janela(cfg)
+    tela = QGuiApplication.primaryScreen().availableGeometry()
+    assert janela.lado_normal == TAMANHOS_ORBE["pequeno"]  # o tamanho salvo continua valendo
+    assert janela.x() + janela.width() / 2 == pytest.approx(tela.x() + tela.width() / 2, abs=1)  # centro horizontal
+    assert janela.y() + janela.height() == tela.y() + tela.height() - MARGEM_BAIXO  # embaixo
+    assert janela.na_posicao_padrao()
+
+    janela.definir_tamanho("grande")  # no centro embaixo, crescer mantém a base e o centro
+    assert janela.na_posicao_padrao()
+
+    janela.move(40, 50)  # o dono arrastou
+    from eco.visual.janela import _gravar_posicao, _ler_posicao
+
+    _gravar_posicao(40, 50)
+    assert _ler_posicao() == (40, 50) and not janela.na_posicao_padrao()
+    janela.voltar_ao_centro()
+    assert janela.na_posicao_padrao()
+    assert _ler_posicao() == (janela.x(), janela.y())
+    assert json.loads(arquivo.read_text(encoding="utf-8"))["versao_posicao"] == 2
+
+
 def test_tamanhos_do_menu(cfg, monkeypatch, tmp_path):
     monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
     monkeypatch.delenv("ECO_ORBE_TAMANHO", raising=False)
