@@ -18,7 +18,7 @@ import atexit
 import time
 
 from PySide6.QtCore import QEasingCurve, QPointF, QRectF, QSize, Qt, QTimer, QVariantAnimation
-from PySide6.QtGui import QColor, QFontMetrics, QPainter, QPainterPath, QPen, QRegion
+from PySide6.QtGui import QBrush, QColor, QFontMetrics, QLinearGradient, QPainter, QPainterPath, QPen, QRegion
 from PySide6.QtWidgets import QApplication, QCheckBox, QFrame, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QVBoxLayout, QWidget
 
 from eco.visual import tema
@@ -185,9 +185,25 @@ class Cartao(QFrame):
         return QRegion(self.rect()) - QRegion(self.rect().adjusted(8, 8, -8, -8))
 
     def _forma(self) -> QPainterPath:
-        forma = QPainterPath()
-        forma.addRoundedRect(QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5), tema.RAIO_CARTAO, tema.RAIO_CARTAO)
-        return forma
+        if getattr(self, "_forma_cache", None) is None or self._forma_tam != self.size():
+            forma = QPainterPath()
+            forma.addRoundedRect(QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5), tema.RAIO_CARTAO, tema.RAIO_CARTAO)
+            self._forma_cache, self._forma_tam = forma, self.size()
+        return self._forma_cache
+
+    def _pintar_vidro(self, p: QPainter, forma: QPainterPath) -> None:
+        """Vidro leve, sem desfoque: brilho que desce do topo (um terço da altura) e aresta de luz de 1 px no topo."""
+        brilho = QLinearGradient(0, 0, 0, max(1.0, self.height() / 3))
+        brilho.setColorAt(0.0, tema.cor(tema.VIDRO, tema.VIDRO_BRILHO * (1 + 0.5 * self.foco)))
+        brilho.setColorAt(1.0, tema.cor(tema.VIDRO, 0.0))
+        p.fillPath(forma, brilho)
+        r = tema.RAIO_CARTAO
+        aresta = QLinearGradient(r, 0, self.width() - r, 0)
+        aresta.setColorAt(0.0, tema.cor(tema.VIDRO, 0.0))
+        aresta.setColorAt(0.5, tema.cor(tema.VIDRO, tema.VIDRO_FIO))
+        aresta.setColorAt(1.0, tema.cor(tema.VIDRO, 0.0))
+        p.setPen(QPen(QBrush(aresta), 1))
+        p.drawLine(QPointF(r, 1.5), QPointF(self.width() - r, 1.5))
 
     def paintEvent(self, e) -> None:
         p = QPainter(self)
@@ -196,7 +212,9 @@ class Cartao(QFrame):
         fundo = tema.misturar(tema.SUPERFICIE, tema.ELEVADO, self.foco)
         fundo.setAlphaF(tema.OPACIDADE_CARTAO + (1 - tema.OPACIDADE_CARTAO) * self.foco)
         p.fillPath(forma, fundo)
+        self._pintar_vidro(p, forma)
         p.setPen(QPen(tema.misturar(tema.BORDA, tema.BORDA_FORTE, self.foco * 0.6), 1))
+        p.setBrush(Qt.BrushStyle.NoBrush)
         p.drawPath(forma)
 
         # marca HUD ao lado do título: quadradinho que acende com o cartão
@@ -364,6 +382,15 @@ class Botao(QPushButton):
         self.setObjectName("principal" if tipo == "principal" else "mini" if tipo in ("mini", "perigo") else "")
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setAttribute(Qt.WidgetAttribute.WA_Hover)
+        self.hover = _Hover(self)
+
+    def enterEvent(self, e) -> None:
+        self.hover.ir(True)
+        super().enterEvent(e)
+
+    def leaveEvent(self, e) -> None:
+        self.hover.ir(False)
+        super().leaveEvent(e)
 
     def _mini(self) -> bool:
         return self.tipo in ("mini", "perigo")
@@ -389,31 +416,44 @@ class Botao(QPushButton):
         forma.lineTo(r.right() - corte, r.bottom())
         forma.lineTo(r.bottomLeft())
         forma.closeSubpath()
-        sobre, foco, ativo = self.underMouse() and self.isEnabled(), self.hasFocus(), self.isEnabled()
-        if self._mini():
-            fundo = tema.cor(tema.ELEVADO) if sobre else tema.cor(tema.ELEVADO, 0.0)
-            borda = tema.VERDE_LUZ if foco else (tema.ALERTA if self.tipo == "perigo" else tema.BORDA_FORTE) if sobre else None
-            texto = (tema.ALERTA if self.tipo == "perigo" else tema.TEXTO) if (sobre or foco) else tema.TEXTO_2
-        elif self.objectName() == "principal":
-            fundo = tema.cor("#248C58" if sobre else tema.VERDE)
-            borda, texto = tema.VERDE_LUZ, tema.TEXTO
-        elif self.objectName() == "parar":  # ação em andamento que pode ser interrompida
-            fundo = tema.cor(tema.ALERTA_FUNDO)
-            borda, texto = tema.ALERTA, tema.TEXTO
-        else:
-            fundo = tema.cor(tema.FUNDO if self.isDown() else tema.ELEVADO if sobre else tema.SUPERFICIE)
-            borda, texto = tema.VERDE_LUZ if (sobre or foco) else tema.BORDA_FORTE, tema.TEXTO
+        foco, ativo = self.hasFocus(), self.isEnabled()
+        # o hover não salta: as cores andam de "parado" para "mouse em cima" em MICRO_MS
+        t = self.hover.valor if ativo else 0.0
+        fundo, borda, texto = (_misturar_qcor(a, b, t) for a, b in zip(self._cores(False, foco), self._cores(True, foco)))
         if not ativo:
-            fundo, borda, texto = tema.cor(tema.SUPERFICIE, 0.0 if self._mini() else 1.0), None if self._mini() else tema.BORDA, tema.TEXTO_APAGADO
+            fundo = tema.cor(tema.SUPERFICIE, 0.0 if self._mini() else 1.0)
+            borda = tema.cor(tema.BORDA, 0.0 if self._mini() else 1.0)
+            texto = QColor(tema.TEXTO_APAGADO)
         p.fillPath(forma, fundo)
-        if borda is not None:
-            p.setPen(QPen(QColor(borda), 2 if (foco and ativo) else 1))
+        if borda.alpha() > 0:
+            p.setPen(QPen(borda, 2 if (foco and ativo) else 1))
             p.setBrush(Qt.BrushStyle.NoBrush)
             p.drawPath(forma)
         p.setFont(self._fonte())
-        p.setPen(QColor(texto))
+        p.setPen(texto)
         p.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, self.text())
         p.end()
+
+    def _cores(self, sobre: bool, foco: bool) -> tuple[QColor, QColor, QColor]:
+        """Fundo, borda e texto do botão parado (`sobre` False) ou com o mouse em cima."""
+        perigo = self.tipo == "perigo"
+        if self._mini():
+            fundo = tema.cor(tema.ELEVADO, 1.0 if sobre else 0.0)
+            if foco:
+                borda = tema.cor(tema.VERDE_LUZ)
+            else:
+                borda = tema.cor(tema.ALERTA if perigo else tema.BORDA_FORTE, 1.0 if sobre else 0.0)
+            texto = (tema.ALERTA if perigo else tema.TEXTO) if (sobre or foco) else tema.TEXTO_2
+        elif self.objectName() == "principal":
+            fundo = tema.cor("#248C58" if sobre else tema.VERDE)
+            borda, texto = tema.cor(tema.VERDE_LUZ), tema.TEXTO
+        elif self.objectName() == "parar":  # ação em andamento que pode ser interrompida
+            fundo = tema.cor(tema.ALERTA_FUNDO)
+            borda, texto = tema.cor(tema.ALERTA), tema.TEXTO
+        else:
+            fundo = tema.cor(tema.FUNDO if self.isDown() else tema.ELEVADO if sobre else tema.SUPERFICIE)
+            borda, texto = tema.cor(tema.VERDE_LUZ if (sobre or foco) else tema.BORDA_FORTE), tema.TEXTO
+        return fundo, borda, QColor(texto)
 
 
 class Aba(QPushButton):
@@ -425,10 +465,19 @@ class Aba(QPushButton):
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setAttribute(Qt.WidgetAttribute.WA_Hover)
         self.reduzido = _movimento_reduzido()
+        self.hover = _Hover(self)
         self._timer = QTimer(self)
         self._timer.setInterval(round(1000 / tema.FLUXO_QUADROS_S))
         self._timer.timeout.connect(self.update)
         self.toggled.connect(self._ligar_fluxo)
+
+    def enterEvent(self, e) -> None:
+        self.hover.ir(True)
+        super().enterEvent(e)
+
+    def leaveEvent(self, e) -> None:
+        self.hover.ir(False)
+        super().leaveEvent(e)
 
     def _fonte(self):
         return tema.fonte_mono(12, negrito=True, maiusculas=True)
@@ -486,9 +535,48 @@ class Aba(QPushButton):
             p.setPen(QPen(QColor(tema.VERDE_LUZ), 1))
             p.drawRect(r)
         p.setFont(self._fonte())
-        p.setPen(QColor(tema.TEXTO if (ativa or sobre) else tema.TEXTO_2))
+        p.setPen(tema.misturar(tema.TEXTO_2, tema.TEXTO, 1.0 if ativa else self.hover.valor))
         p.drawText(self.rect().adjusted(8 if ativa else 0, 0, 0, 0), Qt.AlignmentFlag.AlignCenter, self.text())
         p.end()
+
+
+def _misturar_qcor(a: QColor, b: QColor, t: float) -> QColor:
+    """Cor entre `a` e `b`, alfa incluso (o `tema.misturar` trabalha com cores opacas em texto)."""
+    t = max(0.0, min(1.0, t))
+    return QColor(
+        round(a.red() + (b.red() - a.red()) * t),
+        round(a.green() + (b.green() - a.green()) * t),
+        round(a.blue() + (b.blue() - a.blue()) * t),
+        round(a.alpha() + (b.alpha() - a.alpha()) * t),
+    )
+
+
+class _Hover:
+    """Valor de 0 (mouse fora) a 1 (mouse em cima) que anda em `tema.MICRO_MS` e repinta o widget. Só existe
+    animação enquanto o mouse entra ou sai; com movimento reduzido, salta direto."""
+
+    def __init__(self, widget: QWidget) -> None:
+        self.widget = widget
+        self.valor = 0.0
+        self.reduzido = _movimento_reduzido()
+        self.anim = QVariantAnimation(widget)
+        self.anim.setDuration(tema.MICRO_MS)
+        self.anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self.anim.valueChanged.connect(self._ao_animar)
+
+    def ir(self, dentro: bool) -> None:
+        alvo = 1.0 if dentro else 0.0
+        self.anim.stop()
+        if self.reduzido or not self.widget.isVisible():
+            self._ao_animar(alvo)
+            return
+        self.anim.setStartValue(self.valor)
+        self.anim.setEndValue(alvo)
+        self.anim.start()
+
+    def _ao_animar(self, v) -> None:
+        self.valor = float(v)
+        self.widget.update()
 
 
 def rotulo(texto: str, nome: str = "rotulo") -> QLabel:

@@ -116,6 +116,64 @@ def test_botao_e_aba_hud(qapp):
     assert not aba.grab().toImage().isNull()
 
 
+def test_vidro_e_so_reflexo_e_o_cartao_pinta(qapp):
+    from eco.visual.componentes import Cartao
+
+    assert tema.VIDRO not in tema.CORES_DE_TEXTO  # reflexo, nunca texto
+    assert 0 < tema.VIDRO_BRILHO <= 0.1 and 0 < tema.VIDRO_FIO <= 0.12  # leve: o contraste do texto não muda
+    for cor in tema.CORES_DE_TEXTO:  # texto sobre o cartão com o brilho do vidro por cima continua em AA
+        clareado = tema.misturar(tema.SUPERFICIE, tema.VIDRO, tema.VIDRO_BRILHO * 1.5).name()
+        assert tema.contraste(cor, clareado) >= 4.5
+    c = Cartao("Agenda")
+    c.resize(300, 160)
+    img = c.grab().toImage()
+    assert not img.isNull()
+    assert c._forma() is c._forma()  # forma em cache
+    c.resize(320, 160)
+    assert c._forma().boundingRect().width() > 310
+
+
+def test_hover_dos_botoes_anda_em_vez_de_saltar(qapp):
+    from eco.visual.componentes import Aba, Botao
+
+    b = Botao("Atualizar")
+    b.resize(b.sizeHint())
+    b.show()
+    b.hover.ir(True)
+    assert b.hover.anim.state() == b.hover.anim.State.Running and b.hover.anim.duration() == tema.MICRO_MS
+    b.hover.anim.setCurrentTime(tema.MICRO_MS // 2)
+    assert 0.0 < b.hover.valor < 1.0
+    meio = b._cores(False, False)[0], b._cores(True, False)[0]
+    assert meio[0] != meio[1]  # parado e com o mouse em cima são cores diferentes
+    b.hover.anim.setCurrentTime(tema.MICRO_MS)
+    assert b.hover.valor == 1.0 and not b.grab().toImage().isNull()
+    b.hover.ir(False)
+    b.hover.anim.setCurrentTime(tema.MICRO_MS)
+    assert b.hover.valor == 0.0
+    escondido = Botao("x")
+    escondido.hover.ir(True)  # sem estar à vista não anima: salta
+    assert escondido.hover.valor == 1.0
+    aba = Aba("Painel")
+    aba.resize(aba.sizeHint())
+    aba.show()
+    aba.hover.ir(True)
+    aba.hover.anim.setCurrentTime(tema.MICRO_MS)
+    assert aba.hover.valor == 1.0 and not aba.grab().toImage().isNull()
+    b.hide()
+    aba.hide()
+
+
+def test_hover_com_movimento_reduzido_salta(qapp, monkeypatch):
+    monkeypatch.setenv("ECO_MOVIMENTO_REDUZIDO", "1")
+    from eco.visual.componentes import Botao
+
+    b = Botao("Atualizar")
+    b.show()
+    b.hover.ir(True)
+    assert b.hover.valor == 1.0 and b.hover.anim.state() != b.hover.anim.State.Running
+    b.hide()
+
+
 def test_linha_guarda_a_frase_inteira(qapp):
     from eco.visual.componentes import Linha
 

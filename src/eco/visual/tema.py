@@ -36,7 +36,12 @@ ALERTA_FUNDO = "#2A1412"  # fundo da mensagem de erro na conversa
 # Grafo: cor de cada origem de ideia (memória é sempre ouro, como no documento)
 COR_ORIGEM = {"memoria": OURO, "fato": OURO, "notas": "#7EADD9", "metas": VERDE_LUZ, "manual": TEXTO_2}
 BRILHO_FUNDO = 0.07  # luz verde suave no alto da janela principal (degradê fixo, desenhado uma vez)
-OPACIDADE_CARTAO = 0.84  # "vidro escuro" sem desfoque: deixa as partículas de fundo aparecerem de leve
+OPACIDADE_CARTAO = 0.88  # "vidro escuro" sem desfoque: o degradê do fundo aparece de leve
+# Vidro leve dos cartões, sem desfoque (desfoque custa caro no Qt): um brilho que desce do topo e uma aresta de luz.
+# `VIDRO` é só reflexo, sempre com alfa baixo: nunca texto nem contorno de controle.
+VIDRO = "#FFFFFF"
+VIDRO_BRILHO = 0.05  # alfa do brilho no topo do cartão (sobe um pouco no cartão em foco)
+VIDRO_FIO = 0.08  # alfa da aresta de luz de 1 px no topo
 
 # --- tipografia (tamanhos em pixels) -----------------------------------------------------------------------------
 FONTE_TEXTO = "Segoe UI Variable Text"
@@ -54,6 +59,8 @@ RAIO_HUD = 4
 
 # --- movimento (ms, salvo indicação) -----------------------------------------------------------------------------
 HOVER_MS = 150
+MICRO_MS = 120  # micro-interações: cor de botão e aba ao passar o mouse
+TROCA_ABA_MS = 150  # crossfade ao trocar de aba
 ABA_MS = 200
 ABRIR_MS = 240
 NO_NOVO_MS = 400

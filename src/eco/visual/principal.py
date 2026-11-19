@@ -80,6 +80,37 @@ def icone_eco(tom: float) -> QIcon:
     return icone
 
 
+class _Esmaecer(QWidget):
+    """Troca de aba: a captura da aba anterior fica por cima da nova e some (crossfade). Não recebe cliques."""
+
+    def __init__(self, parent: QWidget, captura: QPixmap, area: QRect) -> None:
+        super().__init__(parent)
+        self.captura = captura
+        self.alfa = 1.0
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.setGeometry(area)
+        self.anim = QVariantAnimation(self)
+        self.anim.setDuration(tema.TROCA_ABA_MS)
+        self.anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self.anim.setStartValue(1.0)
+        self.anim.setEndValue(0.0)
+        self.anim.valueChanged.connect(self._ao_animar)
+        self.anim.finished.connect(self.deleteLater)
+        self.show()
+        self.raise_()
+        self.anim.start()
+
+    def _ao_animar(self, v) -> None:
+        self.alfa = float(v)
+        self.update()
+
+    def paintEvent(self, _e) -> None:
+        p = QPainter(self)
+        p.setOpacity(self.alfa)
+        p.drawPixmap(0, 0, self.captura)
+        p.end()
+
+
 class JanelaPrincipal(QWidget):
     def __init__(
         self,
@@ -135,6 +166,7 @@ class JanelaPrincipal(QWidget):
         self.anim.valueChanged.connect(self._passo)
         self.anim.finished.connect(self._fim_da_animacao)
         self.captura: QPixmap | None = None  # o conteúdo pronto, pintado durante a animação
+        self._esmaecer: _Esmaecer | None = None  # crossfade da troca de aba em andamento
         self.fechando = False
         # a orbe: recebe o quanto deve continuar visível durante a transição (None = acabou, pode voltar a desenhar)
         self.ao_animar: Callable[[float | None], None] | None = None
@@ -256,6 +288,15 @@ class JanelaPrincipal(QWidget):
         """Abas na ordem: Chat, Grafo, Painel, Bloco. Ao abrir o grafo, ele analisa só o que mudou; o painel lê tudo de novo."""
         if self.corpo is None or indice >= self.corpo.count():
             return
+        if indice != self.corpo.currentIndex() and self.corpo.isVisible() and self.captura is None and not movimento_reduzido():
+            antiga = self.corpo.grab()  # a aba de agora, que vai sumir por cima da nova
+            self.corpo.setCurrentIndex(indice)
+            if self._esmaecer is not None:
+                try:
+                    self._esmaecer.deleteLater()
+                except RuntimeError:  # já tinha terminado e se apagado
+                    pass
+            self._esmaecer = _Esmaecer(self, antiga, self.corpo.geometry())
         self.corpo.setCurrentIndex(indice)
         self._cobertos = None
         for i, b in enumerate(self.abas):

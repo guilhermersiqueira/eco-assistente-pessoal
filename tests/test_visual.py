@@ -38,6 +38,31 @@ def test_motor_gera_quadro_valido_em_todos_os_estados(estado):
     assert np.isfinite(q.x).all() and np.isfinite(q.y).all()
 
 
+def test_orbe_pensando_vai_para_o_ciano_e_respira():
+    s = Sistema(0.2, 4)
+    for _ in range(120):
+        q = s.passo(1 / 60, "idle", 0.0, 200)
+    tom_parada = q.hue
+    brilhos = []
+    for _ in range(240):  # 4 s pensando
+        q = s.passo(1 / 60, "think", 0.0, 200)
+        brilhos.append(q.br)
+    assert q.hue > tom_parada + 18  # deslizou para o ciano
+    fim = brilhos[120:]
+    assert max(fim) - min(fim) > 0.1  # respira (brilho sobe e desce)
+    for _ in range(240):
+        q = s.passo(1 / 60, "confirm", 0.0, 200)
+    assert abs(q.hue - 184) < 4  # confirmar: o ciano do token CIANO (tom padrão 148 + 36)
+
+
+def test_mouse_sobre_a_orbe_acende_um_pouco():
+    a, b = Sistema(0.2, 5), Sistema(0.2, 5)
+    for _ in range(60):
+        qa = a.passo(1 / 60, "listen", 0.0, 200)
+        qb = b.passo(1 / 60, "listen", 0.0, 200, (500, 500))
+    assert qb.br == pytest.approx(qa.br * 1.08, rel=0.02)
+
+
 def test_cursor_atrai_particulas():
     s = Sistema(0.3, 2)
     s.passo(1 / 60, "listen", 0, 200)
@@ -383,6 +408,22 @@ def test_janela_principal_com_movimento_reduzido_so_faz_fade(cfg, monkeypatch, t
     assert (g.x(), g.y(), g.width(), g.height()) == alvo
     pr.anim.setCurrentTime(pr.anim.duration())
     assert pr.windowOpacity() == 1.0
+
+
+def test_trocar_de_aba_faz_crossfade_e_o_reduzido_nao(cfg, monkeypatch, tmp_path):
+    _, janela, _ = _orbe(cfg, monkeypatch, tmp_path)
+    janela.abrir_principal()
+    pr = janela.principal
+    pr.anim.setCurrentTime(pr.anim.duration())
+    pr.mostrar_aba(1)
+    esm = pr._esmaecer
+    assert esm is not None and esm.alfa == 1.0 and pr.corpo.currentIndex() == 1
+    esm.anim.setCurrentTime(esm.anim.duration() // 2)
+    assert 0.0 < esm.alfa < 1.0
+    monkeypatch.setenv("ECO_MOVIMENTO_REDUZIDO", "1")
+    pr._esmaecer = None
+    pr.mostrar_aba(0)
+    assert pr._esmaecer is None and pr.corpo.currentIndex() == 0
 
 
 def test_clique_na_orbe_abre_a_janela_principal(cfg, monkeypatch, tmp_path):

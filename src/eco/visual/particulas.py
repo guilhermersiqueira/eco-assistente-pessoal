@@ -12,16 +12,22 @@ from dataclasses import dataclass
 
 import numpy as np
 
-# raio (fração do orbe), giro, brilho, saturação, tremor, deslocamento de tom
+# raio (fração do orbe), giro, brilho, saturação, tremor, deslocamento de tom, respiração do brilho (fração),
+# onda de cor pelos anéis (graus)
+# Pensando: o tom desliza para o ciano, o brilho respira devagar e uma onda de cor passa pelos anéis (processando).
+# Confirmando: ciano de verdade (~184 graus com o tom padrão 148), o mesmo do token CIANO, "precisa do seu sim".
 ESTADOS: dict[str, dict[str, float]] = {
-    "idle": dict(r=0.45, spin=0.25, br=0.35, sat=60, shk=0, hs=0),
-    "listen": dict(r=0.72, spin=0.6, br=0.85, sat=85, shk=0, hs=0),
-    "think": dict(r=0.6, spin=2.4, br=0.95, sat=90, shk=0, hs=6),
-    "speak": dict(r=0.78, spin=1.0, br=1.05, sat=90, shk=0, hs=4),
-    "confirm": dict(r=0.68, spin=0.5, br=1.0, sat=90, shk=0, hs=10),
-    "error": dict(r=0.58, spin=0.7, br=0.7, sat=80, shk=3, hs=-150),
-    "mute": dict(r=0.4, spin=0.12, br=0.25, sat=6, shk=0, hs=0),
+    "idle": dict(r=0.45, spin=0.25, br=0.35, sat=60, shk=0, hs=0, resp=0, onda=0),
+    "listen": dict(r=0.72, spin=0.6, br=0.85, sat=85, shk=0, hs=0, resp=0, onda=0),
+    "think": dict(r=0.6, spin=2.4, br=0.95, sat=90, shk=0, hs=24, resp=0.10, onda=12),
+    "speak": dict(r=0.78, spin=1.0, br=1.05, sat=90, shk=0, hs=4, resp=0, onda=0),
+    "confirm": dict(r=0.68, spin=0.5, br=1.0, sat=90, shk=0, hs=36, resp=0.05, onda=0),
+    "error": dict(r=0.58, spin=0.7, br=0.7, sat=80, shk=3, hs=-150, resp=0, onda=0),
+    "mute": dict(r=0.4, spin=0.12, br=0.25, sat=6, shk=0, hs=0, resp=0, onda=0),
 }
+RESPIRA_HZ = 0.8  # ritmo da respiração do brilho
+ONDA_VEL = 2.2  # velocidade da onda de cor (radianos por segundo)
+BRILHO_HOVER = 0.08  # mouse em cima da orbe: brilho 8% maior
 
 # tipo, raio, inclinação x, inclinação z, giro, partículas
 GRUPOS = [
@@ -126,6 +132,7 @@ class Sistema:
         self.flash = 0.0
         self.gy = 0.0
         self.gx = 0.35
+        self.hov = 0.0  # 0 a 1: o mouse está sobre a orbe
         self.cur = dict(ESTADOS["idle"])
 
     def acender(self) -> None:
@@ -144,9 +151,10 @@ class Sistema:
     ) -> Quadro:
         dt = min(max(dt, 0.0), 0.05)
         self.t += dt
-        k = min(1.0, dt * 3)
+        k = 1 - math.exp(-dt * 4)  # aproximação exponencial: a mesma suavidade em qualquer taxa de quadros
         for canal, alvo in ESTADOS[estado].items():
             self.cur[canal] += (alvo - self.cur[canal]) * k
+        self.hov += ((1.0 if cursor is not None else 0.0) - self.hov) * (1 - math.exp(-dt * 6))
         self.lv += (float(np.clip(nivel, 0, 1)) - self.lv) * min(1.0, dt * 14)
         self.flash = max(0.0, self.flash - dt * 1.1)
 
@@ -154,7 +162,8 @@ class Sistema:
         pulso = max(0.0, math.sin(self.t * 4)) ** 3 * 0.12 if estado == "confirm" else 0.0
         S = lado * 0.42
         R = S * self.cur["r"] * (1 + amp * self.lv + pulso + self.flash * 0.12)
-        br = self.cur["br"] + self.flash * 0.9
+        respira = 1 + self.cur["resp"] * math.sin(self.t * 2 * math.pi * RESPIRA_HZ)
+        br = (self.cur["br"] * respira + self.flash * 0.9) * (1 + BRILHO_HOVER * self.hov)
         hue = tom + self.cur["hs"]
 
         self.gy += dt * 0.12 * (self.cur["spin"] + 0.3)
@@ -199,7 +208,10 @@ class Sistema:
         prof = (z + 1) / 2
         brilho_pisca = 0.75 + 0.25 * np.sin(self.t * 3 + self.tw)
         alfa = np.clip((0.18 + 0.62 * prof) * br * brilho_pisca, 0, 1)
-        cor = hsl_to_rgb(hue + self.hoff, self.cur["sat"] / 100, (44 + prof * 24) / 100) * alfa[:, None]
+        matiz = hue + self.hoff
+        if self.cur["onda"] > 0.05:  # onda de cor que passa de anel em anel
+            matiz = matiz + self.cur["onda"] * np.sin(self.t * ONDA_VEL - self.g * 0.9)
+        cor = hsl_to_rgb(matiz, self.cur["sat"] / 100, (44 + prof * 24) / 100) * alfa[:, None]
         tam = self.size * (0.6 + 1.1 * prof)
 
         an = self.ray_a + self.gy * self.ray_sp
