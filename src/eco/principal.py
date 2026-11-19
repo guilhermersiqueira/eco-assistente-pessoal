@@ -248,6 +248,9 @@ def _laco_voz(cfg: Config, painel: Painel) -> None:
     cerebro = Cerebro(agente, banco)  # o mesmo agente atende a voz e a caixa de texto da aba Conversas
     painel.cerebro = cerebro
     ativador = criar_ativador(cfg)
+    from eco.voz.microfone import vigiar as vigiar_microfone
+
+    vigiar_microfone(painel)  # microfone no mudo do Windows: avisa (balão e legenda), senão a Eco parece quebrada
 
     lembretes = None
     if cfg.lembretes:  # resumo do dia na 1ª abertura + aviso antes dos compromissos (thread só enfileira; quem fala é esta)

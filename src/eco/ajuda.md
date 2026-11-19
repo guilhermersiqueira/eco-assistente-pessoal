@@ -9,6 +9,9 @@ palavras: ativar chamar ei eco palavra de ativação conversar falar ouvir sinal
 Diga "Ei Eco" e espere o sinal sonoro; aí fale o pedido. Depois de responder, ela continua ouvindo por uns 12 segundos
 sem precisar do "Ei Eco" de novo: é só fazer a próxima pergunta. Se ninguém falar logo depois do "Ei Eco", em uns 6
 segundos ela mostra "Não ouvi nada" e volta a esperar. Para encerrar a conversa, diga "tchau" ou "era só isso".
+Se o microfone estiver no mudo do Windows (a tecla de microfone do notebook, por exemplo) ou com o volume em zero, ela
+não consegue ouvir o "Ei Eco": nesse caso aparece um aviso perto do relógio e na legenda da orbe, e outro quando o
+microfone volta.
 
 ## Abrir a interface
 palavras: abrir interface janela principal mostrar tela abas painel
