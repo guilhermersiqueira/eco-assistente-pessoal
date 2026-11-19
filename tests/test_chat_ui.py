@@ -199,6 +199,6 @@ def test_janela_principal_mostra_as_conversas_depois_de_abrir(cfg, qapp, tmp_pat
     j.abrir(None)
     assert _esperar(qapp, lambda: chat.isVisible(), 3)
     g = j.corpo.geometry()
-    assert g.top() > 56 and g.width() == j.width() - 2
+    assert g.top() > 56 and g.width() == j.width() - 12  # 6 px livres de cada lado: é por ali que se redimensiona
     assert not j.grab().toImage().isNull()
     j.hide()

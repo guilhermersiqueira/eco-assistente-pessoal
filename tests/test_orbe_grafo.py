@@ -363,11 +363,11 @@ def test_fundo_desligado_por_padrao_com_degrade_fixo(cfg, qapp, monkeypatch):
     from eco.visual.principal import JanelaPrincipal
 
     j = JanelaPrincipal(carregar_config(), chat=QLabel("chat"))
-    j.resize(800, 500)
+    j.resize(1000, 600)
     assert j.campo is None and not j.grab().toImage().isNull()
     j._ligar_fundo()
     assert not j.relogio_fundo.isActive()
     degrade = j._fundo_fixo()
     assert j._fundo_fixo() is degrade  # pintado uma vez por tamanho
-    j.resize(820, 500)
-    assert j._fundo_fixo() is not degrade and j._fundo_fixo().width() == 820
+    j.resize(1020, 600)
+    assert j._fundo_fixo() is not degrade and j._fundo_fixo().width() == 1020

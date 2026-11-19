@@ -520,3 +520,92 @@ def test_coleta_de_lixo_so_na_thread_principal(monkeypatch):
         relogio.stop()
         if ligado:
             gc.enable()
+
+
+def _principal_aberta(cfg, monkeypatch, tmp_path):
+    _, janela, _ = _orbe(cfg, monkeypatch, tmp_path)
+    janela.abrir_principal()
+    pr = janela.principal
+    pr.anim.setCurrentTime(pr.anim.duration())
+    return janela, pr
+
+
+def test_janela_principal_maximiza_restaura_e_tem_bordas_de_redimensionar(cfg, monkeypatch, tmp_path):
+    from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtGui import QGuiApplication
+
+    from eco.visual.principal import ALTURA_CABECALHO, MARGEM_BORDA, RAIO
+
+    janela, pr = _principal_aberta(cfg, monkeypatch, tmp_path)
+    solta = pr.geometry()
+    w, h = pr.width(), pr.height()
+    assert pr._bordas(QPoint(2, 300)) == Qt.Edge.LeftEdge
+    assert pr._bordas(QPoint(w - 2, h - 2)) == Qt.Edge.RightEdge | Qt.Edge.BottomEdge
+    assert pr._cursor_das_bordas(pr._bordas(QPoint(w - 2, h - 2))) == Qt.CursorShape.SizeFDiagCursor
+    assert not pr._bordas(QPoint(w // 2, h // 2))
+    assert pr.corpo.geometry().left() == MARGEM_BORDA  # a faixa da borda fica livre para o mouse
+    assert [pr._botao_em(pr._area_botao(n).center()) for n in pr.BOTOES] == list(pr.BOTOES)
+    assert pr._area_botao("fechar").right() < w and pr._area_botao("minimizar").left() > w // 2
+
+    pr.alternar_maximizar()
+    area = QGuiApplication.primaryScreen().availableGeometry()
+    assert pr.maximizada and pr.geometry() == area and pr.raio == 0.0
+    assert not pr._bordas(QPoint(1, 1))  # maximizada não redimensiona pela borda
+    assert not pr.grab().toImage().isNull()
+    pr.alternar_maximizar()
+    assert not pr.maximizada and pr.geometry() == solta and pr.raio == RAIO
+
+    from PySide6.QtCore import QEvent, QPointF
+    from PySide6.QtGui import QMouseEvent
+
+    duplo = QMouseEvent(QEvent.Type.MouseButtonDblClick, QPointF(w / 2, ALTURA_CABECALHO / 2), QPointF(w / 2, ALTURA_CABECALHO / 2),
+                        Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
+    pr.mouseDoubleClickEvent(duplo)  # duplo clique no cabeçalho maximiza
+    assert pr.maximizada
+    pr.alternar_maximizar()
+
+
+def test_janela_principal_lembra_tamanho_lugar_e_maximizada(cfg, monkeypatch, tmp_path):
+    from PySide6.QtCore import QRect
+    from PySide6.QtGui import QGuiApplication
+
+    janela, pr = _principal_aberta(cfg, monkeypatch, tmp_path)
+    area = QGuiApplication.primaryScreen().availableGeometry()
+    nova = QRect(area.x() + 10, area.y() + 20, area.width() - 40, area.height() - 60)
+    pr.setGeometry(nova)
+    pr.guardar_geometria()
+    pr.close()
+    pr.anim.setCurrentTime(pr.anim.duration())
+    assert not pr.isVisible()
+    janela.abrir_principal()
+    assert pr.geometry() == nova  # volta onde estava
+    pr.anim.setCurrentTime(pr.anim.duration())
+    pr.alternar_maximizar()
+    pr.close()
+    pr.anim.setCurrentTime(pr.anim.duration())
+    janela.abrir_principal()
+    assert pr.maximizada and pr.geometry() == area  # estava maximizada: abre maximizada
+    pr.anim.setCurrentTime(pr.anim.duration())
+    pr.alternar_maximizar()
+    assert pr.geometry() == nova  # e restaurar volta ao tamanho solto de antes
+
+
+def test_tamanho_salvo_fora_da_tela_e_ignorado(cfg, monkeypatch, tmp_path):
+    import json
+
+    from eco import config
+
+    janela, pr = _principal_aberta(cfg, monkeypatch, tmp_path)
+    (config.PASTA_ECO / "janela.json").write_text(json.dumps({"x": 90000, "y": 90000, "w": 900, "h": 600}), encoding="utf-8")
+    assert pr.geometria_salva() is None  # o monitor dela foi desligado: abre centralizada
+    (config.PASTA_ECO / "janela.json").write_text("{quebrado", encoding="utf-8")
+    assert pr.geometria_salva() is None
+
+
+def test_abrir_com_a_janela_minimizada_traz_ela_de_volta(cfg, monkeypatch, tmp_path):
+    janela, pr = _principal_aberta(cfg, monkeypatch, tmp_path)
+    voltou = []
+    monkeypatch.setattr(pr, "isMinimized", lambda: True)
+    monkeypatch.setattr(pr, "showNormal", lambda: voltou.append(1))
+    janela.abrir_principal()
+    assert voltou == [1] and pr.anim.state() != pr.anim.State.Running  # sem refazer a animação
