@@ -132,6 +132,7 @@ class JanelaPrincipal(QWidget):
         self.estado_eco: Callable[[], tuple[str, float]] | None = None
         self.campo: fundo.CampoFundo | None = None if cfg.fundo == "desligado" else fundo.CampoFundo(cfg.fundo, cfg.orbe_tom)
         self.quadro_fundo: fundo.QuadroFundo | None = None
+        self._degrade: QPixmap | None = None  # fundo fixo (sem partículas): refeito só ao mudar de tamanho
         self.densidade_caiu = False
         self._ret_fundo: list[QRect] = []
         self._cobertos: list[QWidget] | None = None  # campos opacos da aba aberta (escondem as partículas)
@@ -273,6 +274,7 @@ class JanelaPrincipal(QWidget):
 
     def resizeEvent(self, e) -> None:
         super().resizeEvent(e)
+        self._degrade = None
         if self.corpo is not None and self.corpo.isVisible():
             self._posicionar_chat()
 
@@ -346,7 +348,9 @@ class JanelaPrincipal(QWidget):
             p.setClipPath(forma)
         else:
             p.fillRect(self.rect(), QColor(tema.FUNDO))  # o Qt já recorta pela área suja: é barato
-        if self.quadro_fundo is not None and self.conteudo > 0.01:
+        if self.campo is None:
+            p.drawPixmap(0, 0, self._fundo_fixo())
+        elif self.quadro_fundo is not None and self.conteudo > 0.01:
             fundo.pintar(p, self.quadro_fundo, self.area_fundo(), self.conteudo)
         if not aberta or reg.intersects(QRect(0, 0, w, ALTURA_CABECALHO + 1)):
             self._pintar_cabecalho(p)
@@ -357,6 +361,20 @@ class JanelaPrincipal(QWidget):
             p.setBrush(Qt.BrushStyle.NoBrush)
             p.drawPath(forma)
         p.end()
+
+    def _fundo_fixo(self) -> QPixmap:
+        """Luz verde suave vinda do alto, ao centro, sobre `FUNDO`. Pintada uma vez por tamanho de janela."""
+        if self._degrade is None or self._degrade.size() != self.size():
+            pm = QPixmap(self.size())
+            pm.fill(Qt.GlobalColor.transparent)
+            q = QPainter(pm)
+            luz = QRadialGradient(self.width() / 2, -self.height() * 0.15, max(self.width(), self.height()) * 0.75)
+            luz.setColorAt(0.0, tema.cor(tema.VERDE, tema.BRILHO_FUNDO))
+            luz.setColorAt(1.0, tema.cor(tema.VERDE, 0.0))
+            q.fillRect(pm.rect(), luz)
+            q.end()
+            self._degrade = pm
+        return self._degrade
 
     def _pintar_cabecalho(self, p: QPainter) -> None:
         """Bolinha da cor da orbe, nome, linha de baixo e botão de fechar."""

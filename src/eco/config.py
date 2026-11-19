@@ -74,7 +74,7 @@ class Config:
     filtro_voz: bool = True  # Silero VAD descarta gravação sem voz antes da transcrição (ECO_FILTRO_VOZ=nao desliga)
     preco_transcricao_min: float = 0.003
     preco_fala_min: float = 0.017
-    fundo: str = "medio"  # partículas de fundo da janela principal: desligado, baixo, medio ou alto
+    fundo: str = "desligado"  # partículas de fundo da janela principal: desligado (padrão desde 18/11/2026), baixo, medio ou alto
 
 
 def _caminho_opcional(nome: str) -> Path | None:
@@ -149,7 +149,7 @@ def carregar_config() -> Config:
         particulas=float(env("ECO_PARTICULAS", "1.0")),
         grafo_vista="2d" if env("ECO_GRAFO_VISTA", "orbe").strip().lower() == "2d" else "orbe",
         grafo_qualidade=_nivel_qualidade(env("ECO_GRAFO_QUALIDADE", "medio"), "medio"),
-        fundo=_nivel_qualidade(env("ECO_FUNDO", "medio"), "medio", desligavel=True),
+        fundo=_nivel_qualidade(env("ECO_FUNDO", "desligado"), "desligado", desligavel=True),
         filtro_voz=env("ECO_FILTRO_VOZ", "sim").strip().lower() not in ("nao", "não", "0", "false"),
         backup_horas=float(env("ECO_BACKUP_HORAS", "24")),
         backup_manter=int(env("ECO_BACKUP_MANTER", "14")),

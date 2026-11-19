@@ -35,6 +35,7 @@ COR_GERAL = TEXTO_2  # área "Geral", sem espaço
 ALERTA_FUNDO = "#2A1412"  # fundo da mensagem de erro na conversa
 # Grafo: cor de cada origem de ideia (memória é sempre ouro, como no documento)
 COR_ORIGEM = {"memoria": OURO, "fato": OURO, "notas": "#7EADD9", "metas": VERDE_LUZ, "manual": TEXTO_2}
+BRILHO_FUNDO = 0.07  # luz verde suave no alto da janela principal (degradê fixo, desenhado uma vez)
 OPACIDADE_CARTAO = 0.84  # "vidro escuro" sem desfoque: deixa as partículas de fundo aparecerem de leve
 
 # --- tipografia (tamanhos em pixels) -----------------------------------------------------------------------------

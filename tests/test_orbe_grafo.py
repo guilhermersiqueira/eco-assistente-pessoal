@@ -329,18 +329,20 @@ def test_densidade_e_reducao():
 def test_config_do_fundo_e_do_grafo(cfg, monkeypatch):
     from eco.config import _nivel_qualidade
 
-    assert cfg.fundo == "medio" and cfg.grafo_qualidade == "medio" and cfg.grafo_vista == "orbe"
+    assert cfg.fundo == "desligado" and cfg.grafo_qualidade == "medio" and cfg.grafo_vista == "orbe"
     assert _nivel_qualidade("Médio", "baixo") == "medio" and _nivel_qualidade("xyz", "alto") == "alto"
     assert _nivel_qualidade("nao", "medio", desligavel=True) == "desligado"
     assert _nivel_qualidade("nao", "medio") == "medio"
 
 
 def test_janela_pinta_o_fundo_e_le_o_estado_da_eco(cfg, qapp, monkeypatch):
+    monkeypatch.setenv("ECO_FUNDO", "medio")  # desligado por padrão desde 18/11/2026; quem quiser religa
     from PySide6.QtWidgets import QLabel
 
+    from eco.config import carregar_config
     from eco.visual.principal import JanelaPrincipal
 
-    j = JanelaPrincipal(cfg, chat=QLabel("chat"))
+    j = JanelaPrincipal(carregar_config(), chat=QLabel("chat"))
     j.resize(900, 600)
     assert j.campo is not None and j.quadro_fundo is not None
     pedidos = []
@@ -353,8 +355,8 @@ def test_janela_pinta_o_fundo_e_le_o_estado_da_eco(cfg, qapp, monkeypatch):
     assert not j.relogio_fundo.isActive()
 
 
-def test_fundo_desligado(cfg, qapp, monkeypatch):
-    monkeypatch.setenv("ECO_FUNDO", "desligado")
+def test_fundo_desligado_por_padrao_com_degrade_fixo(cfg, qapp, monkeypatch):
+    monkeypatch.delenv("ECO_FUNDO", raising=False)
     from PySide6.QtWidgets import QLabel
 
     from eco.config import carregar_config
@@ -365,3 +367,7 @@ def test_fundo_desligado(cfg, qapp, monkeypatch):
     assert j.campo is None and not j.grab().toImage().isNull()
     j._ligar_fundo()
     assert not j.relogio_fundo.isActive()
+    degrade = j._fundo_fixo()
+    assert j._fundo_fixo() is degrade  # pintado uma vez por tamanho
+    j.resize(820, 500)
+    assert j._fundo_fixo() is not degrade and j._fundo_fixo().width() == 820
