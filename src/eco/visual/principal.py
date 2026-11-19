@@ -776,7 +776,13 @@ class JanelaPrincipal(QWidget):
 
     def closeEvent(self, e) -> None:
         e.ignore()  # fechar só esconde; a Eco continua rodando (para sair: menu da orbe ou da bandeja)
-        self.fechar()
+        if e.spontaneous():  # pedido do Windows (Alt+F4, barra de tarefas): encolhe de volta para a orbe
+            self.fechar()
+        else:
+            # pedido do próprio programa (QApplication.quit no "Sair", Ctrl+C, fim do laço de voz): some NA HORA. Se
+            # a janela continuar visível animando, o Qt 6 entende que ela recusou fechar e cancela a saída da Eco
+            # inteira (foi o que deixou a Eco meio fechada, sem ouvir, em 18/11/2026)
+            self.hide()
 
     def hideEvent(self, e) -> None:
         animando = self.anim.state() == QVariantAnimation.State.Running

@@ -343,7 +343,7 @@ def test_janela_principal_cresce_a_partir_da_orbe_e_fechar_so_esconde(cfg, monke
     assert pr.captura is None and pr.corpo.isVisible() and all(b.isVisible() for b in pr.abas)
     assert not janela.pausada  # a orbe volta a desenhar
     assert not pr.grab().toImage().isNull()
-    pr.close()  # fechar encolhe de volta para a orbe e só esconde
+    pr.fechar()  # o X (e o Esc) encolhe de volta para a orbe e só esconde
     assert pr.isVisible() and pr.fechando and pr.captura is not None and janela.pausada
     pr.anim.setCurrentTime(pr.anim.duration())
     assert not pr.isVisible() and not pr.fechando and not janela.pausada
@@ -574,14 +574,14 @@ def test_janela_principal_lembra_tamanho_lugar_e_maximizada(cfg, monkeypatch, tm
     nova = QRect(area.x() + 10, area.y() + 20, area.width() - 40, area.height() - 60)
     pr.setGeometry(nova)
     pr.guardar_geometria()
-    pr.close()
+    pr.fechar()
     pr.anim.setCurrentTime(pr.anim.duration())
     assert not pr.isVisible()
     janela.abrir_principal()
     assert pr.geometry() == nova  # volta onde estava
     pr.anim.setCurrentTime(pr.anim.duration())
     pr.alternar_maximizar()
-    pr.close()
+    pr.fechar()
     pr.anim.setCurrentTime(pr.anim.duration())
     janela.abrir_principal()
     assert pr.maximizada and pr.geometry() == area  # estava maximizada: abre maximizada
@@ -609,3 +609,39 @@ def test_abrir_com_a_janela_minimizada_traz_ela_de_volta(cfg, monkeypatch, tmp_p
     monkeypatch.setattr(pr, "showNormal", lambda: voltou.append(1))
     janela.abrir_principal()
     assert voltou == [1] and pr.anim.state() != pr.anim.State.Running  # sem refazer a animação
+
+
+def test_close_do_programa_esconde_na_hora(cfg, monkeypatch, tmp_path):
+    janela, pr = _principal_aberta(cfg, monkeypatch, tmp_path)
+    pr.close()  # o QApplication.quit manda assim (não espontâneo): nada de animação
+    assert not pr.isVisible() and not pr.fechando
+
+
+_SAIR_COM_A_INTERFACE_ABERTA = r"""
+import os, sys, tempfile
+from pathlib import Path
+pasta = tempfile.mkdtemp()
+os.environ.update(ECO_DADOS_DIR=pasta, ECO_ENV_FILE=os.path.join(pasta, "x.env"), QT_QPA_PLATFORM="offscreen")
+import eco.config as config; config.PASTA_ECO = Path(pasta)
+import eco.visual.janela as jm; jm.PASTA_ECO = Path(pasta)
+from PySide6.QtCore import QTimer
+from PySide6.QtWidgets import QApplication
+from eco.config import carregar_config
+from eco.visual.janela import abrir_janela
+app, orbe, _ = abrir_janela(carregar_config())
+orbe.abrir_principal()
+orbe.principal.anim.setCurrentTime(orbe.principal.anim.duration())
+QTimer.singleShot(200, QApplication.quit)
+QTimer.singleShot(8000, lambda: os._exit(3))
+app.exec()
+print("saiu", flush=True)
+"""
+
+
+def test_sair_fecha_a_eco_mesmo_com_a_interface_aberta(tmp_path):
+    """Regressão de 18/11/2026: com a interface aberta, o "Sair" não fechava a Eco (ela ficava viva sem ouvir)."""
+    import subprocess
+    import sys
+
+    r = subprocess.run([sys.executable, "-c", _SAIR_COM_A_INTERFACE_ABERTA], capture_output=True, text=True, timeout=60, cwd=tmp_path)
+    assert r.returncode == 0 and "saiu" in r.stdout, (r.returncode, r.stdout, r.stderr[-800:])
