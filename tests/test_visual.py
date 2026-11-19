@@ -435,6 +435,30 @@ def test_clique_na_orbe_abre_a_janela_principal(cfg, monkeypatch, tmp_path):
     assert not janela.principal.isVisible()
 
 
+def test_apertar_e_arrastar_move_a_orbe_sem_abrir_a_interface(cfg, monkeypatch, tmp_path):
+    from PySide6.QtCore import QEvent, QPointF, Qt
+    from PySide6.QtGui import QMouseEvent
+
+    from eco.visual.janela import _ler_posicao
+
+    _, janela, _ = _orbe(cfg, monkeypatch, tmp_path)
+    inicio = janela.pos()
+
+    def ev(tipo, local, botoes=Qt.MouseButton.LeftButton):
+        glob = QPointF(inicio) + local
+        return QMouseEvent(tipo, local, glob, Qt.MouseButton.LeftButton, botoes, Qt.KeyboardModifier.NoModifier)
+
+    janela.mousePressEvent(ev(QEvent.Type.MouseButtonPress, QPointF(100, 100)))
+    janela.mouseMoveEvent(ev(QEvent.Type.MouseMove, QPointF(102, 101)))  # tremidinha: ainda é clique
+    assert janela.movendo is None and janela.pos() == inicio
+    janela.mouseMoveEvent(ev(QEvent.Type.MouseMove, QPointF(160, 80)))  # andou: vira arrasto
+    assert janela.movendo is not None and not janela.pressionado
+    assert (janela.x() - inicio.x(), janela.y() - inicio.y()) == (60, -20)
+    janela.mouseReleaseEvent(ev(QEvent.Type.MouseButtonRelease, QPointF(160, 80), Qt.MouseButton.NoButton))
+    assert janela.movendo is None and janela.principal is None  # arrastar não abre a interface
+    assert _ler_posicao() == (janela.x(), janela.y())  # e lembra onde ficou
+
+
 def test_clique_enquanto_ela_fala_so_interrompe(cfg, monkeypatch, tmp_path):
     _, janela, painel = _orbe(cfg, monkeypatch, tmp_path)
     janela.estado = "speak"

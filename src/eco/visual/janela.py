@@ -32,6 +32,7 @@ QUADROS_S_CALMO = 30  # pensando, confirmando, legenda, erro, mudo: o movimento 
 REAGE_AO_VOLUME = ("listen", "speak")
 TEMPO_LEGENDA = 6.0
 VERSAO_POSICAO = 2  # 2 = centro embaixo (18/11/2026): posições salvas antes disso são ignoradas uma vez
+LIMIAR_ARRASTO = 6  # px que o mouse anda com o botão apertado até virar "arrastar a orbe"
 MARGEM_BAIXO = 24  # distância da orbe (com a legenda) até a barra de tarefas
 PREPARAR_INTERFACE_MS = 3000  # a janela principal é montada escondida logo depois de a Eco abrir
 
@@ -174,6 +175,7 @@ class JanelaOrbe(QWidget):
         self.janela_flutuante = None  # código e texto longo das respostas
         self._clique_valido = False  # o clique atual pode virar "abrir a interface"
         self._t_press = 0.0
+        self._press_global: QPointF | None = None  # onde o botão foi apertado (para saber se virou arrasto)
         self.movendo: QPointF | None = None
         self.quadro = None
         self.img_buf: np.ndarray | None = None
@@ -385,6 +387,11 @@ class JanelaOrbe(QWidget):
     # --- mouse ----------------------------------------------------------------------------
     def mouseMoveEvent(self, e) -> None:
         pos = e.position()
+        if self.movendo is None and self._press_global is not None and not self.tela_cheia:
+            andou = e.globalPosition() - self._press_global
+            if abs(andou.x()) + abs(andou.y()) >= LIMIAR_ARRASTO:  # apertou e arrastou: move a orbe
+                self.movendo = self._press_global - QPointF(self.pos())
+                self.pressionado, self._clique_valido, self.cursor = False, False, None
         if self.movendo is not None and not self.tela_cheia:
             self.move((e.globalPosition() - self.movendo).toPoint())
             return
@@ -529,16 +536,21 @@ class JanelaOrbe(QWidget):
                 self._clique_valido = False
                 return
             if not self.tela_cheia and e.modifiers() & (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier):
-                self.movendo = e.globalPosition() - QPointF(self.pos())
+                self.movendo = e.globalPosition() - QPointF(self.pos())  # com Ctrl/Shift já começa movendo
             else:
+                # clique rápido parado abre a interface; segurar parado puxa as faíscas; apertar e arrastar move
                 self.pressionado = True
                 self.cursor = (e.position().x(), e.position().y())
                 self._clique_valido, self._t_press = True, time.perf_counter()
+                self._press_global = e.globalPosition()
 
     def mouseReleaseEvent(self, e) -> None:
         if e.button() == Qt.MouseButton.LeftButton:
+            self._press_global = None
             if self.movendo is not None:
                 self.movendo = None
+                if QGuiApplication.screenAt(self.geometry().center()) is None:  # largou fora de qualquer tela
+                    self.move(*self._posicao_padrao())
                 _gravar_posicao(self.x(), self.y())
             elif self._clique_valido and time.perf_counter() - self._t_press < 0.35:  # clique rápido (segurar mexe nas faíscas)
                 self.abrir_principal()
@@ -567,7 +579,7 @@ class JanelaOrbe(QWidget):
         if not self.tela_cheia:
             a_centro = menu.addAction("Voltar ao centro")
             a_centro.setEnabled(not self.na_posicao_padrao())
-            a_pos = menu.addAction("Mover (Ctrl + arrastar)")
+            a_pos = menu.addAction("Mover: clique e arraste")
             a_pos.setEnabled(False)
         a_sair = menu.addAction("Sair")
         r = menu.exec(e.globalPos())
@@ -758,7 +770,7 @@ def demo(cfg: Config) -> int:
     ]
 
     def trabalho(painel: PainelQt) -> None:
-        painel.legenda("Demo do orbe da Eco. Ctrl + arrastar move; botão direito abre o menu; clique abre a interface; tela cheia pelo menu.")
+        painel.legenda("Demo do orbe da Eco. Clique e arraste para mover; botão direito abre o menu; clique abre a interface; tela cheia pelo menu.")
         painel.estado("listen")
         time.sleep(2)
         t0 = time.perf_counter()
