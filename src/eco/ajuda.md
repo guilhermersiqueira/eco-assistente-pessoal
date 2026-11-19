@@ -15,7 +15,15 @@ palavras: abrir interface janela principal mostrar tela abas painel
 Diga "Ei Eco, abra a interface" (ou "mostra a interface"): a janela principal abre na hora, sem custo, porque esse
 comando é resolvido pela própria Eco, sem passar pela IA. Também abre clicando na orbe, pelo menu da orbe (botão
 direito, "Abrir interface") ou pelo ícone da Eco perto do relógio. A janela tem as abas Conversas, Grafo, Painel e Bloco.
-Fechar a janela só a esconde: a Eco continua rodando.
+Ela cresce a partir da orbe e, ao fechar (X ou Esc), encolhe de volta para ela. Fechar a janela só a esconde: a Eco
+continua rodando.
+
+## Onde fica a orbe
+palavras: orbe posição lugar centro mover arrastar tamanho voltar ao centro tela cheia
+A orbe aparece no centro da tela, embaixo, logo acima da barra de tarefas. Para mudá-la de lugar, segure Ctrl (ou
+Shift) e arraste; ela lembra a posição. Para trazê-la de volta, use "Voltar ao centro" no menu da orbe (botão direito).
+O tamanho (pequeno, médio, grande ou tela cheia) fica no mesmo menu, em "Tamanho". Quando ela está pensando, a cor
+puxa para o ciano e o brilho respira devagar; esperando o seu "sim", fica ciano.
 
 ## Modo foco
 palavras: foco modo foco concentrar silêncio quieta não falar sair entrar

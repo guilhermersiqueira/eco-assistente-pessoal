@@ -11,7 +11,8 @@ Nenhuma aba escreve cor, fonte, medida ou duração solta. Tudo sai de `tema.py`
 ## Identidade
 
 - **Tema escuro**, quase preto com um fundo esverdeado. Verde floresta e ciano são as cores da Eco.
-- **"Vidro escuro":** cartões 84% opacos (`OPACIDADE_CARTAO`), sem desfoque, deixando as partículas do fundo (`visual/fundo.py`) aparecerem de leve.
+- **Vidro leve, sem desfoque:** cartões 88% opacos (`OPACIDADE_CARTAO`) com um brilho que desce do topo e uma aresta de luz de 1 px (`VIDRO`, `VIDRO_BRILHO`, `VIDRO_FIO`). Desfoque de verdade fica de fora: no Qt ele custa caro e trava.
+- **Leveza antes de efeito:** a janela principal não tem partículas de fundo (`ECO_FUNDO=desligado` por padrão desde 18/11/2026); no lugar, um degradê fixo com luz verde suave no alto (`BRILHO_FUNDO`), pintado uma vez. O grafo mantém o visual dele.
 - **Estilo HUD:** rótulos em fonte mono, canto cortado em abas e botões, fluxo de luz verde na borda do cartão em foco.
 - A Eco é **ela** (feminino) em todo texto da interface.
 
@@ -33,6 +34,7 @@ Nenhuma aba escreve cor, fonte, medida ou duração solta. Tudo sai de `tema.py`
 | `OURO` | `#E8C15A` | **só memória** (fatos, lembranças) |
 | `ALERTA` | `#E0605A` | erro, atraso, ação destrutiva |
 | `ALERTA_FUNDO` | `#2A1412` | fundo da mensagem de erro na conversa |
+| `VIDRO` | `#FFFFFF` | **só reflexo** do vidro, sempre com alfa baixo (`VIDRO_BRILHO` 5%, `VIDRO_FIO` 8%); nunca texto ou contorno |
 
 **Significados fixos**
 
@@ -75,23 +77,28 @@ Tamanhos em pixels: `ROTULO` 11 · `CORPO` 13 · `SUBTITULO` 15 · `TITULO` 20. 
 
 | Token | Valor | Onde |
 |---|---|---|
-| `HOVER_MS` | 150 ms | cartão ao ganhar foco (o hover dos botões é instantâneo) |
-| `ABA_MS` | 200 ms | troca de aba |
+| `MICRO_MS` | 120 ms | hover de botões e abas |
+| `HOVER_MS` | 150 ms | cartão ao ganhar foco |
+| `TROCA_ABA_MS` | 150 ms | crossfade ao trocar de aba |
+| `ABA_MS` | 200 ms | (reservado) |
 | `ABRIR_MS` | 240 ms | abrir painel/diálogo |
 | `NO_NOVO_MS` | 400 ms | ideia nova no grafo |
 | `REORGANIZAR_MS` | 600 ms | grafo se reorganizando |
 | `CURSOR_MS` | 800 ms | piscar do cursor |
 | `FLUXO_VOLTA_S` | 6 s | uma volta do fluxo de luz, a 30 quadros/s |
 
-- Janela principal abre crescendo a partir da orbe (380 ms).
-- **Movimento reduzido:** com a animação do Windows desligada ou `ECO_MOVIMENTO_REDUZIDO=sim`, só fade (160 ms) e sem fluxo de luz.
-- Desempenho manda: o fluxo de luz anda em **um cartão por vez**, só na moldura, e para sem foco ou com a janela escondida.
+- **Abrir a interface:** o círculo da orbe cresce até virar o painel (280 ms, OutQuart), com o conteúdo chegando de 96% a 100%; a orbe se apaga nos primeiros 40%. Fechar faz o inverso em 180 ms. A janela já nasce no tamanho final e a animação pinta uma **captura** do conteúdo pronto; no fim, a captura dá lugar aos widgets de verdade. A janela é montada e aquecida escondida 3 s depois de a Eco abrir.
+- **Movimento reduzido:** com a animação do Windows desligada ou `ECO_MOVIMENTO_REDUZIDO=sim`, abrir é só fade (160 ms), fechar é imediato, o hover salta, a troca de aba não faz crossfade e não há fluxo de luz.
+- **Desempenho manda:**
+  - O fluxo de luz anda em **um cartão por vez**, só na moldura, e para sem foco ou com a janela escondida.
+  - A orbe desenha o brilho em meia resolução e as faíscas nítidas por cima (~3 ms por quadro no tamanho médio). Ela roda a 60 quadros/s ouvindo e falando e a 30 no resto, e pausa enquanto a interface abre.
+  - Animação nova deve seguir o mesmo princípio: pintar uma captura em vez de redimensionar ou repintar widgets a cada quadro.
 
 ## Estados de interação
 
 | Estado | Visual |
 |---|---|
-| Hover em botão | fundo `ELEVADO`, borda `VERDE_LUZ` |
+| Hover em botão | fundo `ELEVADO`, borda `VERDE_LUZ` (a cor anda em `MICRO_MS`) |
 | Foco por teclado | borda `VERDE_LUZ` |
 | Seleção | fundo `VERDE` (menus, texto); em lista, fundo `ELEVADO` + barra esquerda `VERDE_LUZ` |
 | Desabilitado | texto `TEXTO_APAGADO`, borda `BORDA` |
@@ -100,11 +107,11 @@ Tamanhos em pixels: `ROTULO` 11 · `CORPO` 13 · `SUBTITULO` 15 · `TITULO` 20. 
 
 ## Componentes (`visual/componentes.py`)
 
-- **`Cartao`** — painel com título HUD; contorno grafite. Em foco sobe para `ELEVADO` e ganha o fluxo de luz verde na borda.
+- **`Cartao`** — painel de vidro leve com título HUD; contorno grafite. Em foco sobe para `ELEVADO`, o brilho do vidro aumenta e ganha o fluxo de luz verde na borda.
 - **`Caixa`** — caixa de marcar de uma linha: título em destaque + detalhes separados por `SEPARADOR` (" · ").
 - **`Linha`** — linha de lista (evento, e-mail) com partes de estilos diferentes: `hora`, `texto`, `discreto`, `direita`.
-- **`Botao`** — canto inferior direito cortado. Tipos: `normal`, `principal` (a ação da tela, fundo `VERDE`), `mini` (ação de linha, transparente), além dos estados de perigo e "parar".
-- **`Aba`** — rótulo mono; a ativa tem canto cortado, marcação técnica e fluxo de luz.
+- **`Botao`** — canto inferior direito cortado. Tipos: `normal`, `principal` (a ação da tela, fundo `VERDE`), `mini` (ação de linha, transparente), além dos estados de perigo e "parar". O hover interpola as cores (`_Hover`).
+- **`Aba`** — rótulo mono; a ativa tem canto cortado, marcação técnica e fluxo de luz. O texto clareia no hover (`_Hover`).
 - **`rotulo()`** — rótulo pequeno em mono.
 - **Diálogos** (`visual/dialogos.py`): `perguntar`, `avisar`, `texto`, `texto_longo`, `escolher`, todos HUD. Ação que apaga, troca ou junta sempre pede confirmação.
 
@@ -118,13 +125,15 @@ Partículas em anéis que giram em planos diferentes, núcleo brilhante e linhas
 |---|---|
 | `idle` | pequena, lenta, fraca |
 | `listen` | cresce e acende; reage ao volume do microfone |
-| `think` | gira rápido, anel tracejado |
+| `think` | gira rápido, anel tracejado; o tom desliza para o ciano, o brilho respira (0,8 Hz) e uma onda de cor passa pelos anéis |
 | `speak` | maior; reage ao envelope do áudio da fala |
-| `confirm` | arco girando; esperando o "sim" |
+| `confirm` | arco girando, no ciano do token `CIANO` (~184°); esperando o "sim" |
 | `error` | coral, com tremor |
 | `mute` | cinza, sempre visível |
 
-Mais o brilho de memória guardada (ouro) quando ela lembra, anota, define meta ou cria tarefa. Ela fica invisível dormindo, surge com fade quando chamada e some depois da legenda.
+Mais o brilho de memória guardada (ouro) quando ela lembra, anota, define meta ou cria tarefa, e um brilho 8% maior com o mouse em cima. Ela fica invisível dormindo, surge com fade quando chamada e some depois da legenda.
+
+**Posição:** centro horizontal, embaixo, logo acima da barra de tarefas (`MARGEM_BAIXO` 24 px). Ctrl ou Shift + arrastar move, e a posição fica no `~/.eco/orbe.json` (`versao_posicao` 2: posições salvas antes do centro foram ignoradas uma vez). O menu tem "Voltar ao centro". Trocar o tamanho no centro mantém a base fixa.
 
 ## Telas
 
@@ -140,6 +149,7 @@ Janela principal com abas: **Painel** (duas colunas de cartões: Agenda, Tarefas
 
 ## Decisões a validar
 
-- "Vidro escuro" sem desfoque (decisão técnica, por desempenho).
-- Hover dos botões instantâneo; só o cartão anima.
-- As partículas de fundo aparecem pouco porque os cartões cobrem quase tudo: decidir se aumenta.
+- Intensidade do vidro (`VIDRO_BRILHO` 5%, `VIDRO_FIO` 8%) e do degradê do fundo (`BRILHO_FUNDO` 7%) na tela real.
+- Ritmo da respiração e da onda de cor da orbe pensando (`RESPIRA_HZ`, `ONDA_VEL` em `visual/particulas.py`).
+
+Decididas em 18/11/2026: vidro sem desfoque, só nos cartões; hover animado em 120 ms; sem partículas de fundo na janela principal (o grafo mantém o visual); orbe no centro embaixo.
