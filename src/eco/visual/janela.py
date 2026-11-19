@@ -31,6 +31,7 @@ QUADROS_S_REAGINDO = 60  # ouvindo e falando: a orbe segue o volume, precisa de 
 QUADROS_S_CALMO = 30  # pensando, confirmando, legenda, erro, mudo: o movimento é lento, 30 bastam
 REAGE_AO_VOLUME = ("listen", "speak")
 TEMPO_LEGENDA = 6.0
+PREPARAR_INTERFACE_MS = 3000  # a janela principal é montada escondida logo depois de a Eco abrir
 
 
 def tamanho_da_legenda(tela_cheia: bool) -> int:
@@ -191,6 +192,8 @@ class JanelaOrbe(QWidget):
         self.timer.setTimerType(Qt.TimerType.PreciseTimer)  # o padrão do Windows arredonda para ~15 ms e engasga
         self.timer.timeout.connect(self._tick)
         self.timer.start(16)
+        # monta a janela principal escondida, com a Eco já de pé: o primeiro "abrir" fica tão rápido quanto os outros
+        QTimer.singleShot(PREPARAR_INTERFACE_MS, self._preparar_principal)
 
     def _configurar_desenho(self, orbe_px: float, lado_brilho: int) -> None:
         """Brilho e rastro em `lado_brilho` (borrados, baratos), ampliados até `orbe_px`; as faíscas vão nítidas por
@@ -209,6 +212,19 @@ class JanelaOrbe(QWidget):
         """Para de desenhar (a janela principal anima a abertura e precisa do processador só para ela)."""
         self.pausada = pausada
         self.t_ultimo = time.perf_counter()
+
+    def _transicao_principal(self, fator: float | None) -> None:
+        """Chamada pela janela principal a cada quadro da animação: a orbe pausa e se apaga (`fator` de 1 a 0), e
+        volta ao normal com None."""
+        if fator is None:
+            self.pausar(False)
+            self.opac_aplicada = -1.0  # o próximo quadro reaplica a opacidade de verdade
+            return
+        if not self.pausada:
+            self.pausar(True)
+        if self.isVisible():
+            self.setWindowOpacity(self.opac * max(0.0, min(1.0, fator)))
+            self.opac_aplicada = -1.0
 
     def _aplicar_opacidade(self, valor: float) -> None:
         if abs(valor - self.opac_aplicada) > 0.002 or (valor in (0.0, 1.0) and valor != self.opac_aplicada):
@@ -357,19 +373,34 @@ class JanelaOrbe(QWidget):
         cx, cy = self.x() + self.centro[0], self.y() + self.centro[1]
         return QRect(int(cx - lado / 2), int(cy - lado / 2), int(lado), int(lado))
 
-    def abrir_principal(self) -> None:
-        """Abre a janela principal crescendo a partir da orbe (clique, voz, menu ou ícone da bandeja)."""
+    def _criar_principal(self) -> None:
+        """Monta a janela principal e as abas (escondidas). Não carrega nada: cada aba lê os dados ao ser aberta."""
+        from eco.visual.bloco import PainelBloco
+        from eco.visual.chat import PainelChat
+        from eco.visual.dashboard import PainelDashboard
+        from eco.visual.grafo import PainelGrafo
         from eco.visual.principal import JanelaPrincipal
 
-        if self.principal is None:
-            from eco.visual.chat import PainelChat
-            from eco.visual.bloco import PainelBloco
-            from eco.visual.dashboard import PainelDashboard
-            from eco.visual.grafo import PainelGrafo
+        chat = PainelChat(self.cfg, self.painel)
+        self.principal = JanelaPrincipal(self.cfg, chat=chat, grafo=PainelGrafo(self.cfg, chat.banco), dashboard=PainelDashboard(self.cfg), bloco=PainelBloco(self.cfg))  # mesmo banco
+        self.principal.estado_eco = lambda: (self.estado, self.alvo_nivel)  # as partículas de fundo reagem à Eco
+        self.principal.ao_animar = self._transicao_principal
+        self.principal.origem_fechar = self.retangulo_do_orbe
 
-            chat = PainelChat(self.cfg, self.painel)
-            self.principal = JanelaPrincipal(self.cfg, chat=chat, grafo=PainelGrafo(self.cfg, chat.banco), dashboard=PainelDashboard(self.cfg), bloco=PainelBloco(self.cfg))  # mesmo banco
-            self.principal.estado_eco = lambda: (self.estado, self.alvo_nivel)  # as partículas de fundo reagem à Eco
+    def _preparar_principal(self) -> None:
+        if self.principal is not None:
+            return
+        try:
+            self._criar_principal()
+            self.principal.aquecer(self.retangulo_do_orbe())
+        except Exception as e:  # se falhar aqui, o clique tenta de novo (e mostra o erro de verdade)
+            self.principal = None
+            print(f"[interface] não consegui preparar a janela principal: {e}")
+
+    def abrir_principal(self) -> None:
+        """Abre a janela principal crescendo a partir da orbe (clique, voz, menu ou ícone da bandeja)."""
+        if self.principal is None:
+            self._criar_principal()
         self.principal.abrir(self.retangulo_do_orbe())
 
     def _pedir_texto(self, titulo: str, rotulo: str, valor: str, resposta: dict, pronto) -> None:

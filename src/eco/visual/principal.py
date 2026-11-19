@@ -1,7 +1,10 @@
 """Janela principal da Eco (Qt). Por enquanto só o cabeçalho e um espaço vazio: o grafo e o chat entram depois.
 
-Abre crescendo a partir da orbe (um círculo que vira painel). Com a animação do Windows desligada
-(equivalente do `prefers-reduced-motion`), faz só um fade simples. Fechar só esconde: a Eco continua rodando.
+Abre crescendo a partir da orbe (um círculo que vira painel). A janela já nasce no tamanho final e a animação é
+pintada dentro dela, sobre uma captura do conteúdo pronto: nada é redimensionado nem montado a cada quadro, e no fim a
+captura dá lugar aos widgets de verdade (a imagem é a mesma, então não há pulo). Fechar faz o caminho inverso, de volta
+à orbe, e só esconde: a Eco continua rodando. Com a animação do Windows desligada (equivalente do
+`prefers-reduced-motion`), abrir é só um fade e fechar é imediato.
 """
 
 from __future__ import annotations
@@ -23,8 +26,11 @@ from eco.visual.componentes import Aba
 LARGURA, ALTURA = 1360, 860
 ALTURA_CABECALHO = 56
 RAIO = 18.0
-DURACAO_MS = 380
+DURACAO_MS = 280
+DURACAO_FECHAR_MS = 180
 DURACAO_FADE_MS = 160
+ESCALA_INICIAL = 0.96  # o conteúdo chega de 96% a 100% enquanto o painel cresce
+ORBE_SOME_ATE = 0.4  # a orbe se apaga nos primeiros 40% da abertura: ela "vira" a janela
 
 
 def movimento_reduzido() -> bool:
@@ -127,7 +133,12 @@ class JanelaPrincipal(QWidget):
         self._alvo = (0.0, 0.0, 0.0, 0.0)
         self.anim = QVariantAnimation(self)
         self.anim.valueChanged.connect(self._passo)
-        self.anim.finished.connect(self._mostrar_chat)
+        self.anim.finished.connect(self._fim_da_animacao)
+        self.captura: QPixmap | None = None  # o conteúdo pronto, pintado durante a animação
+        self.fechando = False
+        # a orbe: recebe o quanto deve continuar visível durante a transição (None = acabou, pode voltar a desenhar)
+        self.ao_animar: Callable[[float | None], None] | None = None
+        self.origem_fechar: Callable[[], QRect | None] | None = None  # para onde a janela encolhe ao fechar
         # partículas de fundo (visual/fundo.py): o estado vem da orbe, por `estado_eco` -> (estado, volume da voz)
         self.estado_eco: Callable[[], tuple[str, float]] | None = None
         self.campo: fundo.CampoFundo | None = None if cfg.fundo == "desligado" else fundo.CampoFundo(cfg.fundo, cfg.orbe_tom)
@@ -292,39 +303,123 @@ class JanelaPrincipal(QWidget):
             self.raise_()
             self.activateWindow()
             return
-        if self.corpo is not None:
-            self.corpo.hide()
-            for b in self.abas:
-                b.hide()
         alvo = self.retangulo_alvo(origem)
         self._alvo = (alvo.x(), alvo.y(), alvo.width(), alvo.height())
         o = origem or QRect(alvo.center().x() - 24, alvo.center().y() - 24, 48, 48)
         self._origem = (o.x(), o.y(), o.width(), o.height())
         self.reduzido = movimento_reduzido()
+        self.fechando = False
         self.anim.stop()
+        self.setGeometry(alvo)  # uma vez só: a animação acontece dentro da janela
+        self._capturar()
         self.anim.setDuration(DURACAO_FADE_MS if self.reduzido else DURACAO_MS)
-        self.anim.setEasingCurve(QEasingCurve.Type.Linear if self.reduzido else QEasingCurve.Type.OutCubic)
+        self.anim.setEasingCurve(QEasingCurve.Type.Linear if self.reduzido else QEasingCurve.Type.OutQuart)
         self.anim.setStartValue(0.0)
         self.anim.setEndValue(1.0)
+        self.setWindowOpacity(0.0 if self.reduzido else 1.0)
         self._passo(0.0)
         self.show()
         self.raise_()
         self.activateWindow()
         self.anim.start()
 
+    def fechar(self) -> None:
+        """Encolhe de volta para a orbe e esconde (X, Esc, fechar pelo sistema)."""
+        if not self.isVisible() or self.fechando:
+            return
+        if movimento_reduzido():
+            self.hide()
+            return
+        self.reduzido = False
+        g = self.geometry()
+        self._alvo = (g.x(), g.y(), g.width(), g.height())
+        o = None
+        if self.origem_fechar is not None:
+            try:
+                o = self.origem_fechar()
+            except Exception:  # a orbe é só o destino: sem ela, encolhe para o centro
+                o = None
+        o = o or QRect(g.center().x() - 24, g.center().y() - 24, 48, 48)
+        self._origem = (o.x(), o.y(), o.width(), o.height())
+        self.anim.stop()
+        self.relogio_fundo.stop()
+        self.captura = self.grab()  # como está agora, com o que a pessoa estava vendo
+        self._esconder_conteudo()
+        self.fechando = True
+        self.anim.setDuration(DURACAO_FECHAR_MS)
+        self.anim.setEasingCurve(QEasingCurve.Type.InCubic)
+        self.anim.setStartValue(1.0)
+        self.anim.setEndValue(0.0)
+        self.anim.start()
+
+    def aquecer(self, origem: QRect | None = None) -> None:
+        """Com a janela escondida: põe no tamanho de abrir e pinta tudo uma vez, descartando a imagem. A 1ª pintura
+        (o Qt polindo cada widget) custa ~100 ms; depois disso a captura do clique leva ~12 ms."""
+        if self.isVisible():
+            return
+        self.setGeometry(self.retangulo_alvo(origem))
+        self.winId()  # cria a janela nativa do Windows agora (no 1º show ela custava ~60 ms)
+        self._capturar()
+        self.captura = None
+
+    def _esconder_conteudo(self) -> None:
+        if self.corpo is not None:
+            self.corpo.hide()
+        for b in self.abas:
+            b.hide()
+
+    def _capturar(self) -> None:
+        """Pinta a janela pronta (abas, cabeçalho, fundo) numa imagem e esconde os widgets: durante a animação só a
+        imagem é desenhada. Funciona com a janela ainda escondida."""
+        self.p, self.raio, self.conteudo = 1.0, RAIO, 1.0
+        self.captura = None
+        if self.corpo is not None:
+            self._posicionar_chat()
+            self.corpo.show()
+            for b in self.abas:
+                b.show()
+        self.captura = self.grab()
+        self._esconder_conteudo()
+
+    def _forma_animada(self) -> QRectF:
+        """Retângulo do painel neste ponto da animação, em coordenadas da janela (da orbe até a janela inteira)."""
+        ox, oy, ow, oh = self._origem
+        ax, ay = self._alvo[0], self._alvo[1]
+        x, y, w, h = interpolar((ox - ax, oy - ay, ow, oh), (0.0, 0.0, float(self.width()), float(self.height())), self.p)
+        return QRectF(x, y, max(1.0, w), max(1.0, h))
+
     def _passo(self, valor) -> None:
         self.p = float(valor)
         if self.reduzido:  # só fade: já no tamanho final
-            x, y, w, h = self._alvo
             self.conteudo, self.raio = 1.0, RAIO
             self.setWindowOpacity(self.p)
         else:  # círculo da orbe que cresce e vira painel
-            x, y, w, h = interpolar(self._origem, self._alvo, self.p)
             self.raio = interpolar((min(self._origem[2], self._origem[3]) / 2,), (RAIO,), self.p)[0]
-            self.conteudo = max(0.0, min(1.0, (self.p - 0.45) / 0.55))
-            self.setWindowOpacity(min(1.0, self.p * 3))
-        self.setGeometry(round(x), round(y), max(1, round(w)), max(1, round(h)))
+            self.conteudo = max(0.0, min(1.0, (self.p - 0.15) / 0.6))
+        if self.ao_animar is not None:
+            try:
+                self.ao_animar(1.0 if self.fechando else max(0.0, 1.0 - self.p / ORBE_SOME_ATE))
+            except Exception:
+                pass
         self.update()
+
+    def _fim_da_animacao(self) -> None:
+        self.captura = None
+        if self.fechando:
+            self.fechando = False
+            self.hide()
+        else:
+            self.p, self.raio, self.conteudo = 1.0, RAIO, 1.0
+            self.setWindowOpacity(1.0)
+            self._mostrar_chat()
+        self._avisar_fim()
+
+    def _avisar_fim(self) -> None:
+        if self.ao_animar is not None:
+            try:
+                self.ao_animar(None)
+            except Exception:
+                pass
 
     # --- pintura --------------------------------------------------------------------------
     def _area_fechar(self) -> QRect:
@@ -333,6 +428,9 @@ class JanelaPrincipal(QWidget):
     def paintEvent(self, evento) -> None:
         """Pinta só o que a área suja toca. As partículas pedem pedacinhos a 15-30 quadros/s; com a janela aberta,
         isso vira fundo liso (sem recorte pelo contorno arredondado), e cabeçalho e borda só entram se forem tocados."""
+        if self.captura is not None:
+            self._pintar_transicao()
+            return
         reg = evento.region()
         w, h = self.width(), self.height()
         aberta = self.p >= 1.0 and self.raio == RAIO
@@ -360,6 +458,36 @@ class JanelaPrincipal(QWidget):
             p.setPen(QPen(QColor(tema.BORDA_FORTE), 1))
             p.setBrush(Qt.BrushStyle.NoBrush)
             p.drawPath(forma)
+        p.end()
+
+    def _pintar_transicao(self) -> None:
+        """Durante a animação: o painel (fundo e borda) na forma atual, com a captura do conteúdo dentro."""
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        if self.reduzido:  # fade: a janela inteira já pronta, a opacidade vem da janela
+            p.drawPixmap(0, 0, self.captura)
+            p.end()
+            return
+        ret = self._forma_animada()
+        forma = QPainterPath()
+        forma.addRoundedRect(ret.adjusted(0.5, 0.5, -0.5, -0.5), self.raio, self.raio)
+        presenca = min(1.0, self.p * 3)
+        p.setOpacity(presenca)
+        p.fillPath(forma, QColor(tema.FUNDO))
+        if self.conteudo > 0.0:
+            p.save()
+            p.setClipPath(forma)
+            escala = ESCALA_INICIAL + (1 - ESCALA_INICIAL) * self.p
+            p.translate(ret.center())
+            p.scale(escala, escala)
+            p.translate(-self.width() / 2, -self.height() / 2)
+            p.setOpacity(self.conteudo)
+            p.drawPixmap(0, 0, self.captura)
+            p.restore()
+        p.setOpacity(presenca)
+        p.setPen(QPen(QColor(tema.BORDA_FORTE), 1))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawPath(forma)
         p.end()
 
     def _fundo_fixo(self) -> QPixmap:
@@ -406,19 +534,24 @@ class JanelaPrincipal(QWidget):
             return
         ponto = e.position().toPoint()
         if self._area_fechar().contains(ponto):
-            self.hide()
+            self.fechar()
         elif ponto.y() < ALTURA_CABECALHO and self.windowHandle() is not None:
             self.windowHandle().startSystemMove()  # arrastar pelo cabeçalho
 
     def keyPressEvent(self, e) -> None:
         if e.key() == Qt.Key.Key_Escape:
-            self.hide()
+            self.fechar()
 
     def closeEvent(self, e) -> None:
         e.ignore()  # fechar só esconde; a Eco continua rodando (para sair: menu da orbe ou da bandeja)
-        self.hide()
+        self.fechar()
 
     def hideEvent(self, e) -> None:
+        animando = self.anim.state() == QVariantAnimation.State.Running
         self.anim.stop()
         self.relogio_fundo.stop()
+        if self.captura is not None or animando:  # escondida no meio da animação: a orbe volta a desenhar
+            self.captura = None
+            self.fechando = False
+            self._avisar_fim()
         super().hideEvent(e)

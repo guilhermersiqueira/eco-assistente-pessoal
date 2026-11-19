@@ -257,25 +257,71 @@ def test_janela_principal_cresce_a_partir_da_orbe_e_fechar_so_esconde(cfg, monke
     assert janela.principal is None
     orbe = janela.retangulo_do_orbe()
     assert orbe.width() == janela.lado_normal
+    janela.estado = "listen"  # a orbe estava à vista quando clicaram nela
+    for _ in range(40):
+        janela.t_ultimo -= 0.03
+        janela._tick()
+    assert janela.isVisible() and janela.opac == 1.0
     janela.abrir_principal()
     pr = janela.principal
     assert pr.isVisible()
     g = pr.geometry()
-    assert (g.x(), g.y(), g.width(), g.height()) == (orbe.x(), orbe.y(), orbe.width(), orbe.height())  # começa na orbe
-    assert pr.windowOpacity() < 0.5 and pr.raio == pytest.approx(orbe.width() / 2)  # círculo
+    alvo = tuple(int(v) for v in pr._alvo)
+    assert (g.x(), g.y(), g.width(), g.height()) == alvo  # já no tamanho final: nada é redimensionado na animação
+    assert pr.captura is not None and not pr.corpo.isVisible()  # durante a animação, só a captura é desenhada
+    forma = pr._forma_animada()
+    assert (round(forma.x() + g.x()), round(forma.y() + g.y()), round(forma.width())) == (orbe.x(), orbe.y(), orbe.width())  # começa na orbe
+    assert pr.raio == pytest.approx(orbe.width() / 2)  # círculo
+    assert janela.pausada and janela.windowOpacity() == pytest.approx(1.0)  # a orbe para de desenhar
     pr.anim.setCurrentTime(pr.anim.duration() // 2)
-    meio = pr.geometry()
-    assert orbe.width() < meio.width() < pr._alvo[2]  # no meio do caminho
+    assert orbe.width() < pr._forma_animada().width() < g.width()  # no meio do caminho
+    assert janela.windowOpacity() == pytest.approx(0.0)  # a orbe já "virou" a janela
+    assert not pr.grab().toImage().isNull()
     pr.anim.setCurrentTime(pr.anim.duration())
     fim = pr.geometry()
-    assert (fim.x(), fim.y(), fim.width(), fim.height()) == tuple(int(v) for v in pr._alvo)
+    assert (fim.x(), fim.y(), fim.width(), fim.height()) == alvo
     assert pr.windowOpacity() == 1.0 and pr.raio == pytest.approx(18.0) and pr.conteudo == 1.0
+    assert pr.captura is None and pr.corpo.isVisible() and all(b.isVisible() for b in pr.abas)
+    assert not janela.pausada  # a orbe volta a desenhar
     assert not pr.grab().toImage().isNull()
-    pr.close()  # fechar só esconde
-    assert not pr.isVisible()
+    pr.close()  # fechar encolhe de volta para a orbe e só esconde
+    assert pr.isVisible() and pr.fechando and pr.captura is not None and janela.pausada
+    pr.anim.setCurrentTime(pr.anim.duration())
+    assert not pr.isVisible() and not pr.fechando and not janela.pausada
     assert app.quitOnLastWindowClosed() is False
     janela.abrir_principal()  # abre de novo, mesma janela
     assert janela.principal is pr and pr.isVisible()
+    pr.hide()  # escondida no meio da animação: a orbe não fica pausada
+    assert not janela.pausada and pr.captura is None
+
+
+def test_janela_principal_e_preparada_escondida_sem_carregar_dados(cfg, monkeypatch, tmp_path):
+    _, janela, _ = _orbe(cfg, monkeypatch, tmp_path)
+    abertas = []
+    from eco.visual.dashboard import PainelDashboard
+
+    monkeypatch.setattr(PainelDashboard, "ao_abrir", lambda self: abertas.append(1))
+    janela._preparar_principal()
+    pr = janela.principal
+    assert pr is not None and not pr.isVisible() and abertas == []
+    janela._preparar_principal()  # de novo: não monta outra
+    assert janela.principal is pr
+    janela.abrir_principal()
+    assert janela.principal is pr and pr.isVisible()
+
+
+def test_captura_da_abertura_mostra_o_conteudo(cfg, monkeypatch, tmp_path):
+    _, janela, _ = _orbe(cfg, monkeypatch, tmp_path)
+    janela.abrir_principal()
+    pr = janela.principal
+    img = pr.captura.toImage()
+    pr.anim.setCurrentTime(pr.anim.duration())
+    real = pr.grab().toImage()
+    assert img.size() == real.size()
+    # a captura é a própria janela pronta: o mesmo desenho que aparece quando a animação acaba (sem pulo)
+    iguais = sum(img.pixel(x, y) == real.pixel(x, y) for x in range(0, img.width(), 40) for y in range(0, img.height(), 40))
+    total = len(range(0, img.width(), 40)) * len(range(0, img.height(), 40))
+    assert iguais / total > 0.95
 
 
 def test_janela_principal_ja_aberta_nao_repete_a_animacao(cfg, monkeypatch, tmp_path):
