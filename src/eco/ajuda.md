@@ -16,12 +16,14 @@ Diga "Ei Eco, abra a interface" (ou "mostra a interface"): a janela principal ab
 comando é resolvido pela própria Eco, sem passar pela IA. Também abre clicando na orbe, pelo menu da orbe (botão
 direito, "Abrir interface") ou pelo ícone da Eco perto do relógio. A janela tem as abas Conversas, Grafo, Painel e Bloco.
 Ela cresce a partir da orbe e, ao fechar (X ou Esc), encolhe de volta para ela. Fechar a janela só a esconde: a Eco
-continua rodando.
+continua rodando. É uma janela como as outras: arraste pelas bordas ou cantos para mudar o tamanho, arraste pelo
+cabeçalho para mover, e use os botões do canto (minimizar, maximizar, fechar) ou o duplo clique no cabeçalho para
+maximizar. Ela abre de novo no mesmo tamanho e lugar (e maximizada, se estava).
 
 ## Onde fica a orbe
 palavras: orbe posição lugar centro mover arrastar tamanho voltar ao centro tela cheia
-A orbe aparece no centro da tela, embaixo, logo acima da barra de tarefas. Para mudá-la de lugar, segure Ctrl (ou
-Shift) e arraste; ela lembra a posição. Para trazê-la de volta, use "Voltar ao centro" no menu da orbe (botão direito).
+A orbe aparece no centro da tela, embaixo, logo acima da barra de tarefas. Para mudá-la de lugar, clique nela e
+arraste para onde quiser; ela lembra a posição. Um clique rápido sem arrastar abre a interface. Para trazê-la de volta, use "Voltar ao centro" no menu da orbe (botão direito).
 O tamanho (pequeno, médio, grande ou tela cheia) fica no mesmo menu, em "Tamanho". Quando ela está pensando, a cor
 puxa para o ciano e o brilho respira devagar; esperando o seu "sim", fica ciano.
 

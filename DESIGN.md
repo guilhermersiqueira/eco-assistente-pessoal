@@ -133,9 +133,11 @@ Partículas em anéis que giram em planos diferentes, núcleo brilhante e linhas
 
 Mais o brilho de memória guardada (ouro) quando ela lembra, anota, define meta ou cria tarefa, e um brilho 8% maior com o mouse em cima. Ela fica invisível dormindo, surge com fade quando chamada e some depois da legenda.
 
-**Posição:** centro horizontal, embaixo, logo acima da barra de tarefas (`MARGEM_BAIXO` 24 px). Ctrl ou Shift + arrastar move, e a posição fica no `~/.eco/orbe.json` (`versao_posicao` 2: posições salvas antes do centro foram ignoradas uma vez). O menu tem "Voltar ao centro". Trocar o tamanho no centro mantém a base fixa.
+**Posição:** centro horizontal, embaixo, logo acima da barra de tarefas (`MARGEM_BAIXO` 24 px). Clicar e arrastar move (a partir de 6 px; um clique rápido parado abre a interface, segurar parado puxa as faíscas; Ctrl ou Shift move de imediato), e a posição fica no `~/.eco/orbe.json` (`versao_posicao` 2: posições salvas antes do centro foram ignoradas uma vez). O menu tem "Voltar ao centro". Trocar o tamanho no centro mantém a base fixa.
 
 ## Telas
+
+**Janela principal:** sem a barra de título do Windows, mas com o comportamento de uma janela comum. Redimensiona por uma faixa de 6 px nas bordas e cantos (`MARGEM_BORDA`, `startSystemResize`) e tem tamanho mínimo de 900×580, que cede em telas menores. O cabeçalho move a janela; duplo clique nele maximiza. No canto ficam os botões minimizar, maximizar/restaurar e fechar (46 px cada; hover em `ELEVADO`, o de fechar em `ALERTA`). Maximizada, ela ocupa a área útil da tela e perde os cantos arredondados; arrastá-la pelo cabeçalho a restaura sob o mouse. Tamanho, lugar e se estava maximizada ficam em `~/.eco/janela.json` e valem na próxima abertura.
 
 Janela principal com abas: **Painel** (duas colunas de cartões: Agenda, Tarefas, E-mails pendentes, Metas), **Conversas** (3 cartões), **Bloco** (2 cartões), **Grafo** (orbe 3D, com "Ver em 2D" e o painel Gerenciar). Respostas longas e código abrem na janela flutuante. Imagens de conferência em `design/`.
 
