@@ -218,13 +218,17 @@ class Sistema:
 
 
 class Renderizador:
-    """Pinta as faíscas num buffer com brilho aditivo e rastro, como o canvas do protótipo."""
+    """Pinta as faíscas num buffer com brilho aditivo e rastro, como o canvas do protótipo.
+
+    O brilho e o rastro são borrados por natureza: a janela usa este buffer em meia resolução (ou menos, em tela
+    cheia) e o amplia; as faíscas nítidas vão por cima, na resolução real (`FaiscasNitidas`)."""
 
     def __init__(self, lado: int, decaimento: float = 0.76, peso_faiscas: float = 1.0) -> None:
         self.peso_faiscas = peso_faiscas  # < 1 quando as faíscas também são desenhadas nítidas por cima
         self.lado = lado
         self.dec = decaimento
         self.buf = np.zeros((3, lado, lado), np.float32)  # planar: cada canal contíguo, bem mais rápido
+        self.plano = self.buf.reshape(-1)
         self.tmp = np.empty_like(self.buf)
         self.saida = np.zeros((lado, lado, 4), np.uint8)
         yy, xx = np.mgrid[0:lado, 0:lado].astype(np.float32)
@@ -248,28 +252,23 @@ class Renderizador:
         for ch in range(3):
             self.buf[ch, c - m : c + m, c - m : c + m] += brilho * cor_nucleo[ch]
 
-        # Cada faísca vira uma mancha gaussiana; em resoluções maiores a mancha cresce junto,
-        # para as faíscas manterem a mesma proporção em relação ao orbe.
-        xs, ys = q.x + L / 2, q.y + L / 2
+        # Cada faísca se espalha pelos 4 pixels vizinhos (bilinear); o borrão vem da ampliação e do rastro.
+        # Um bincount só para os três canais: índices deslocados de L*L por canal.
+        xs, ys = q.x + (L / 2 - 0.5), q.y + (L / 2 - 0.5)
         escala = L / 320
-        sigma = min(0.5 * escala, 0.95)  # kernel 3x3 fixo: barato, e o resto do tamanho vem da ampliação
-        r = 1
         ix, iy = np.floor(xs).astype(np.int64), np.floor(ys).astype(np.int64)
-        energia = np.clip(q.tam**2, 0.05, 4.0) * escala**0.7 / (2 * np.pi * sigma**2)
-        idxs, pesos, cores = [], [], []
-        for ddy in range(-r, r + 1):
-            for ddx in range(-r, r + 1):
-                jx, jy = ix + ddx, iy + ddy
-                d2 = (jx + 0.5 - xs) ** 2 + (jy + 0.5 - ys) ** 2
-                w = np.exp(-d2 / (2 * sigma**2)) * energia * self.peso_faiscas
-                ok = (jx >= 0) & (jx < L) & (jy >= 0) & (jy < L) & (w > 1e-3)
-                idxs.append((jy * L + jx)[ok])
-                pesos.append(w[ok])
-                cores.append(q.cor[ok])
-        idx, w, cor = np.concatenate(idxs), np.concatenate(pesos), np.concatenate(cores)
-        for ch in range(3):
-            soma = np.bincount(idx, weights=w * cor[:, ch], minlength=L * L)
-            self.buf[ch] += soma.reshape(L, L)
+        fx, fy = (xs - ix).astype(np.float32), (ys - iy).astype(np.float32)
+        energia = (np.clip(q.tam**2, 0.05, 4.0) * (escala**0.7 * self.peso_faiscas)).astype(np.float32)
+        idxs, pesos = [], []
+        for ddx, ddy, w in ((0, 0, (1 - fx) * (1 - fy)), (1, 0, fx * (1 - fy)), (0, 1, (1 - fx) * fy), (1, 1, fx * fy)):
+            jx, jy = ix + ddx, iy + ddy
+            ok = (jx >= 0) & (jx < L) & (jy >= 0) & (jy < L)
+            i = (jy * L + jx)[ok]
+            p = (w * energia)[ok, None] * q.cor[ok]  # (k, 3)
+            idxs.append((i[:, None] + np.arange(3) * (L * L)).ravel(order="F"))
+            pesos.append(p.ravel(order="F"))
+        soma = np.bincount(np.concatenate(idxs), weights=np.concatenate(pesos), minlength=3 * L * L)
+        self.plano += soma.astype(np.float32, copy=False)
 
         np.clip(self.buf, 0, 1, out=self.buf)
         np.multiply(self.buf, 255, out=self.tmp)
@@ -292,7 +291,7 @@ class FaiscasNitidas:
     def __init__(self, lado_px: int) -> None:
         self.n = lado_px
         self.img = np.zeros((lado_px, lado_px, 4), np.uint8)
-        self.plano = self.img.reshape(-1)
+        self.pixels = self.img.reshape(-1, 4)  # um pixel RGBA por linha
 
     def quadro(self, q: Quadro, k: float) -> np.ndarray:
         n = self.n
@@ -302,13 +301,16 @@ class FaiscasNitidas:
         fx, fy = xs - ix, ys - iy
         ganho = np.clip(q.tam * 0.9 * np.sqrt(k), 0.9, 2.6)  # faíscas maiores (e mais perto) brilham mais
         base = np.clip(q.cor * ganho[:, None], 0, 1) * 255.0
-        idxs, vals = [], []
         for ddx, ddy, w in ((0, 0, (1 - fx) * (1 - fy)), (1, 0, fx * (1 - fy)), (0, 1, (1 - fx) * fy), (1, 1, fx * fy)):
             jx, jy = ix + ddx, iy + ddy
             ok = (jx >= 0) & (jx < n) & (jy >= 0) & (jy < n)
-            v = (base[ok] * (w[ok] ** 0.6)[:, None]).astype(np.uint8)  # ^0.6: o ponto não some entre pixels
-            a = v.max(axis=1, keepdims=True)  # alfa = maior canal (cor pré-multiplicada válida)
-            vals.append(np.concatenate([v, a], axis=1))
-            idxs.append(((jy * n + jx)[ok] * 4)[:, None] + np.arange(4))
-        np.maximum.at(self.plano, np.concatenate(idxs).ravel(), np.concatenate(vals).ravel())
+            v = np.empty((int(ok.sum()), 4), np.uint8)
+            v[:, :3] = base[ok] * (w[ok] ** 0.6)[:, None]  # ^0.6: o ponto não some entre pixels
+            v[:, 3] = v[:, :3].max(axis=1)  # alfa = maior canal (cor pré-multiplicada válida)
+            i = (jy * n + jx)[ok]
+            # lê, fica com o maior e grava: duas faíscas no mesmo pixel no mesmo passo ficam com a última,
+            # diferença invisível e bem mais barata que np.maximum.at
+            atual = self.pixels[i]
+            np.maximum(atual, v, out=atual)
+            self.pixels[i] = atual
         return self.img

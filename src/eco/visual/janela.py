@@ -25,7 +25,11 @@ from eco.visual import tema
 from eco.visual.particulas import FaiscasNitidas, Renderizador, Sistema
 
 ALTURA_LEGENDA = 76
-NIVEIS_BRILHO = [320, 400, 480, 560, 640, 800]  # resolução do brilho/rastro em tela cheia (adaptativa)
+NIVEIS_BRILHO = [160, 200, 240, 280, 320, 400]  # resolução do brilho/rastro em tela cheia (adaptativa)
+PESO_FAISCAS = 0.45  # o brilho leva só parte da energia das faíscas: elas vão nítidas por cima
+QUADROS_S_REAGINDO = 60  # ouvindo e falando: a orbe segue o volume, precisa de 60
+QUADROS_S_CALMO = 30  # pensando, confirmando, legenda, erro, mudo: o movimento é lento, 30 bastam
+REAGE_AO_VOLUME = ("listen", "speak")
 TEMPO_LEGENDA = 6.0
 
 
@@ -129,12 +133,10 @@ class JanelaOrbe(QWidget):
         self.cfg = cfg
         salvo = _ler_estado().get("tamanho")  # o tamanho escolhido no menu vale, salvo ECO_ORBE_TAMANHO explícito
         self.lado_normal = TAMANHOS_ORBE[salvo] if salvo in TAMANHOS_ORBE and "ECO_ORBE_TAMANHO" not in os.environ else cfg.orbe_tamanho
-        self.lado = self.lado_normal  # lado do desenho interno (em tela cheia sobe para ficar nítido)
         self.tela_cheia = False
-        self.nitidas: FaiscasNitidas | None = None  # faíscas na resolução da tela (só em tela cheia)
+        self.nitidas: FaiscasNitidas | None = None  # faíscas na resolução da janela, por cima do brilho
         self.ov: np.ndarray | None = None
-        self.k = 1.0  # escala do desenho interno para a janela
-        self.centro = (self.lado / 2, self.lado / 2)  # centro do orbe em coordenadas da janela
+        self.centro = (self.lado_normal / 2, self.lado_normal / 2)  # centro do orbe em coordenadas da janela
         self.geom_normal = None
         self.painel = painel
         self.setWindowFlags(
@@ -146,11 +148,13 @@ class JanelaOrbe(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
         self.setMouseTracking(True)
-        self.setFixedSize(self.lado, self.lado + ALTURA_LEGENDA)
+        self.setFixedSize(self.lado_normal, self.lado_normal + ALTURA_LEGENDA)
         self.setWindowTitle("Eco")
 
         self.sistema = Sistema(cfg.particulas)
-        self.render = Renderizador(self.lado)
+        self._configurar_desenho(self.lado_normal, self.lado_normal // 2)
+        self.opac_aplicada = -1.0  # última opacidade passada ao Windows (mudar a cada quadro custa caro)
+        self.pausada = False  # a janela principal pede pausa enquanto anima a abertura
         self.estado = "idle"
         self.alvo_nivel = 0.0
         self.legenda = ""
@@ -188,6 +192,34 @@ class JanelaOrbe(QWidget):
         self.timer.timeout.connect(self._tick)
         self.timer.start(16)
 
+    def _configurar_desenho(self, orbe_px: float, lado_brilho: int) -> None:
+        """Brilho e rastro em `lado_brilho` (borrados, baratos), ampliados até `orbe_px`; as faíscas vão nítidas por
+        cima, na resolução da janela. `self.lado` é o sistema de coordenadas do motor (o do brilho)."""
+        antigo = getattr(self, "lado", lado_brilho)
+        self.lado = lado_brilho
+        self.k = orbe_px / lado_brilho
+        self.render = Renderizador(lado_brilho, peso_faiscas=PESO_FAISCAS)
+        self.nitidas = FaiscasNitidas(int(round(orbe_px)))
+        self.ov = None
+        r = lado_brilho / antigo  # mantém o deslocamento das faíscas (cursor) proporcional
+        s = self.sistema
+        s.ox *= r; s.oy *= r; s.vx *= r; s.vy *= r
+
+    def pausar(self, pausada: bool) -> None:
+        """Para de desenhar (a janela principal anima a abertura e precisa do processador só para ela)."""
+        self.pausada = pausada
+        self.t_ultimo = time.perf_counter()
+
+    def _aplicar_opacidade(self, valor: float) -> None:
+        if abs(valor - self.opac_aplicada) > 0.002 or (valor in (0.0, 1.0) and valor != self.opac_aplicada):
+            self.setWindowOpacity(valor)
+            self.opac_aplicada = valor
+
+    def _intervalo(self) -> int:
+        """Milissegundos entre quadros: 60 por segundo quando a orbe segue o volume, 30 no resto."""
+        alvo = QUADROS_S_REAGINDO if self.estado in REAGE_AO_VOLUME or self.pressionado or self.cursor else QUADROS_S_CALMO
+        return round(1000 / alvo)
+
     # --- entradas -------------------------------------------------------------------------
     def _posicao_padrao(self) -> tuple[int, int]:
         tela = QGuiApplication.primaryScreen().availableGeometry()
@@ -222,14 +254,22 @@ class JanelaOrbe(QWidget):
         if self.opac <= 0.005:
             if self.isVisible():
                 self.hide()
+            self.opac_aplicada = -1.0
             self.timer.setInterval(80)
             self.sistema.passo(dt, "idle", 0, self.lado)  # mantém a animação "viva" sem pintar
             return
-        self.timer.setInterval(16)
+        if self.pausada:
+            self.timer.setInterval(80)
+            return
+        intervalo = self._intervalo()
+        if self.timer.interval() != intervalo:
+            self.timer.setInterval(intervalo)
+            if self.tela_cheia:  # outra taxa: a medição de folga recomeça
+                self.ema_dt, self.t_troca = intervalo / 1000, agora
         if not self.isVisible():
             self.show()
-        self.setWindowOpacity(self.opac)
-        if self.tela_cheia:
+        self._aplicar_opacidade(self.opac)
+        if self.tela_cheia and intervalo < 20:  # a adaptação mede folga a 60 quadros/s; a 30 sempre sobra
             self._adaptar_qualidade(min(dt, 0.1), agora)
 
         cur = None
@@ -313,7 +353,7 @@ class JanelaOrbe(QWidget):
 
     def retangulo_do_orbe(self) -> QRect:
         """Onde o orbe está na tela agora (mesmo com a janela dele invisível): ponto de partida da janela principal."""
-        lado = self.orbe_px if self.tela_cheia else self.lado
+        lado = self.orbe_px if self.tela_cheia else self.lado_normal
         cx, cy = self.x() + self.centro[0], self.y() + self.centro[1]
         return QRect(int(cx - lado / 2), int(cy - lado / 2), int(lado), int(lado))
 
@@ -365,10 +405,10 @@ class JanelaOrbe(QWidget):
         if novo == self.lado_normal:
             return
         centro = self.geometry().center()  # cresce e encolhe em torno do mesmo ponto
-        self.lado_normal = self.lado = novo
-        self.render = Renderizador(self.lado)
-        self.centro = (self.lado / 2, self.lado / 2)
-        self.setFixedSize(self.lado, self.lado + ALTURA_LEGENDA)
+        self.lado_normal = novo
+        self._configurar_desenho(novo, novo // 2)
+        self.centro = (novo / 2, novo / 2)
+        self.setFixedSize(novo, novo + ALTURA_LEGENDA)
         tela = (QGuiApplication.screenAt(centro) or QGuiApplication.primaryScreen()).availableGeometry()
         x = max(tela.left(), min(centro.x() - self.width() // 2, tela.right() - self.width()))
         y = max(tela.top(), min(centro.y() - self.height() // 2, tela.bottom() - self.height()))
@@ -377,15 +417,8 @@ class JanelaOrbe(QWidget):
 
     def _nivel_brilho(self, idx: int) -> None:
         """Escolhe a resolução do brilho/rastro em tela cheia. As faíscas são sempre nítidas, na tela."""
-        antigo = self.lado
         self.nivel_brilho = idx
-        self.lado = NIVEIS_BRILHO[idx]
-        self.k = self.orbe_px / self.lado
-        self.render = Renderizador(self.lado, peso_faiscas=0.45)
-        self.nitidas = FaiscasNitidas(int(self.lado * self.k))
-        r = self.lado / antigo  # mantém o deslocamento das faíscas (cursor) proporcional
-        s = self.sistema
-        s.ox *= r; s.oy *= r; s.vx *= r; s.vy *= r
+        self._configurar_desenho(self.orbe_px, NIVEIS_BRILHO[idx])
 
     def _adaptar_qualidade(self, dt: float, agora: float) -> None:
         """Sobe a nitidez enquanto o PC dá conta de ~60 quadros/s; desce se começar a engasgar."""
@@ -419,13 +452,11 @@ class JanelaOrbe(QWidget):
             self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         else:
             self.tela_cheia = False
-            self.nitidas = self.ov = None
             self.sistema = Sistema(self.cfg.particulas)
-            self.lado = self.lado_normal
-            self.render = Renderizador(self.lado)
-            self.k = 1.0
-            self.centro = (self.lado / 2, self.lado / 2)
-            self.setFixedSize(self.lado, self.lado + ALTURA_LEGENDA)
+            self.lado = self.lado_normal // 2
+            self._configurar_desenho(self.lado_normal, self.lado_normal // 2)
+            self.centro = (self.lado_normal / 2, self.lado_normal / 2)
+            self.setFixedSize(self.lado_normal, self.lado_normal + ALTURA_LEGENDA)
             if self.geom_normal is not None:
                 self.move(self.geom_normal.topLeft())
 

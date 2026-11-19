@@ -122,7 +122,39 @@ def test_tela_cheia_alterna(cfg, monkeypatch, tmp_path):
         janela._tick()
     assert not janela.grab().toImage().isNull()
     janela.alternar_tela_cheia()
-    assert not janela.tela_cheia and janela.width() == janela.lado_normal and janela.k == 1.0
+    assert not janela.tela_cheia and janela.width() == janela.lado_normal and janela.k == 2.0  # brilho em meia resolução
+
+
+def test_orbe_so_muda_a_opacidade_quando_precisa_e_a_taxa_segue_o_estado(cfg, monkeypatch, tmp_path):
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    monkeypatch.setattr("eco.visual.janela._arquivo_posicao", lambda: tmp_path / "orbe.json")
+    from eco.visual.janela import abrir_janela
+
+    app, janela, painel = abrir_janela(cfg)
+    chamadas = []
+    original = janela.setWindowOpacity
+    monkeypatch.setattr(janela, "setWindowOpacity", lambda v: (chamadas.append(v), original(v)))
+    janela.estado = "listen"
+    for _ in range(60):
+        janela.t_ultimo -= 0.03
+        janela._tick()
+    assert janela.opac == 1.0
+    depois_de_acender = len(chamadas)
+    for _ in range(20):  # já está em 1: não chama o Windows de novo
+        janela.t_ultimo -= 0.03
+        janela._tick()
+    assert len(chamadas) == depois_de_acender
+    assert janela.timer.interval() == 17  # ouvindo: 60 quadros/s
+    janela.estado = "think"
+    janela._tick()
+    assert janela.timer.interval() == 33  # pensando: 30 quadros/s
+    janela.pausar(True)
+    antes = janela.quadro
+    janela._tick()
+    assert janela.quadro is antes  # pausada: não desenha
+    janela.pausar(False)
+    janela._tick()
+    assert janela.quadro is not antes
 
 
 def test_tamanhos_do_menu(cfg, monkeypatch, tmp_path):
@@ -135,7 +167,8 @@ def test_tamanhos_do_menu(cfg, monkeypatch, tmp_path):
     app, janela, painel = abrir_janela(cfg)
     assert janela.lado_normal == TAMANHOS_ORBE["medio"]
     janela.definir_tamanho("grande")
-    assert janela.width() == TAMANHOS_ORBE["grande"] and janela.render.lado == TAMANHOS_ORBE["grande"]
+    assert janela.width() == TAMANHOS_ORBE["grande"] and janela.render.lado == TAMANHOS_ORBE["grande"] // 2
+    assert janela.nitidas.n == TAMANHOS_ORBE["grande"] and janela.k == 2.0
     janela.definir_tamanho("tela")
     assert janela.tela_cheia
     janela.definir_tamanho("pequeno")
@@ -223,7 +256,7 @@ def test_janela_principal_cresce_a_partir_da_orbe_e_fechar_so_esconde(cfg, monke
     app, janela, painel = _orbe(cfg, monkeypatch, tmp_path)
     assert janela.principal is None
     orbe = janela.retangulo_do_orbe()
-    assert orbe.width() == janela.lado
+    assert orbe.width() == janela.lado_normal
     janela.abrir_principal()
     pr = janela.principal
     assert pr.isVisible()
